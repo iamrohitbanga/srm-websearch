@@ -33,6 +33,7 @@ class SRMVocabulary
 	Map <String , Integer> titleVocabulary;
 	Map <String , Integer> educationVocabulary;
 }
+
 public class SRM 
 {
 	public static void main(String [] args)
