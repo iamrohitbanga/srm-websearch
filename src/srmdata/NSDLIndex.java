@@ -3,27 +3,25 @@ package srmdata;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileReader;
-import java.io.IOException;
 
 import org.apache.lucene.analysis.standard.StandardAnalyzer;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.Field;
 import org.apache.lucene.document.Field.Index;
 import org.apache.lucene.document.Field.Store;
-import org.apache.lucene.index.CorruptIndexException;
+import org.apache.lucene.document.NumericField;
 import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.IndexWriter;
 import org.apache.lucene.index.IndexWriterConfig;
-import org.apache.lucene.index.Term;
 import org.apache.lucene.queryParser.QueryParser;
-import org.apache.lucene.search.Collector;
+import org.apache.lucene.search.BooleanClause;
+import org.apache.lucene.search.BooleanQuery;
 import org.apache.lucene.search.IndexSearcher;
-import org.apache.lucene.search.Query;
+import org.apache.lucene.search.NumericRangeQuery;
 import org.apache.lucene.search.ScoreDoc;
-import org.apache.lucene.search.TermQuery;
 import org.apache.lucene.search.TopDocs;
-import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.FSDirectory;
+import org.apache.lucene.util.NumericUtils;
 import org.apache.lucene.util.Version;
 
 public class NSDLIndex {
@@ -47,22 +45,52 @@ public class NSDLIndex {
 
 		Document doc = null;
 		String line;
+
+		int titleLen = 0;
+		int contentLen = 0;
+		int descLen = 0;
+		int audienceLen = 0;
+		int subjectLen = 0;
+		
 		while ((line = reader.readLine()) != null) {
 
 			if (line.equals("")) {
 				if (doc != null) {
-					doc.add(new Field("num_audience",
-							"" + doc.getValues("audience").length,
-							Store.YES, Index.NOT_ANALYZED));
-					doc.add(new Field("num_educationLevel",
-							"" + doc.getValues("educationLevel").length,
-							Store.YES, Index.NOT_ANALYZED));
-					doc.add(new Field("num_subject",
-							"" + doc.getValues("subject").length,
-							Store.YES, Index.NOT_ANALYZED));
-					doc.add(new Field("num_sub",
-							"" + doc.getValues("sub").length,
-							Store.YES, Index.NOT_ANALYZED));
+					doc.add(new NumericField("title_len",
+							NumericUtils.PRECISION_STEP_DEFAULT,
+							Store.YES, true).setIntValue(titleLen));
+					doc.add(new NumericField("content_len",
+							NumericUtils.PRECISION_STEP_DEFAULT,
+							Store.YES, true).setIntValue(contentLen));
+					doc.add(new NumericField("desc_len",
+							NumericUtils.PRECISION_STEP_DEFAULT,
+							Store.YES, true).setIntValue(descLen));
+					doc.add(new NumericField("audience_len",
+							NumericUtils.PRECISION_STEP_DEFAULT,
+							Store.YES, true).setDoubleValue(((double)audienceLen) / doc.getValues("audience").length));
+					doc.add(new NumericField("subject_len",
+							NumericUtils.PRECISION_STEP_DEFAULT,
+							Store.YES, true).setDoubleValue(((double)subjectLen) / doc.getValues("subject").length));
+
+					titleLen = 0;
+					contentLen = 0;
+					descLen = 0;
+					audienceLen = 0;
+					subjectLen = 0;
+
+					doc.add(new NumericField("num_audience",
+							NumericUtils.PRECISION_STEP_DEFAULT,
+							Store.YES, true).setIntValue(doc.getValues("audience").length));
+					doc.add(new NumericField("num_educationLevel",
+							NumericUtils.PRECISION_STEP_DEFAULT,
+							Store.YES, true).setIntValue(doc.getValues("educationLevel").length));
+					doc.add(new NumericField("num_subject",
+							NumericUtils.PRECISION_STEP_DEFAULT,
+							Store.YES, true).setIntValue(doc.getValues("subject").length));
+					doc.add(new NumericField("num_sub",
+							NumericUtils.PRECISION_STEP_DEFAULT,
+							Store.YES, true).setIntValue(doc.getValues("sub").length));
+
 					iw.addDocument(doc);
 				}
 				doc = new Document();
@@ -70,7 +98,19 @@ public class NSDLIndex {
 			else {
 				int index = line.indexOf(':');
 				assert (index != -1);
-				doc.add(new Field(line.substring(0,index), line.substring(index+2), Store.YES, Index.ANALYZED));
+				String fieldName = line.substring(0,index);
+				String fieldValue = line.substring(index+2);
+				doc.add(new Field(fieldName, fieldValue, Store.YES, Index.ANALYZED));
+				if (fieldName.equals("title"))
+					titleLen = fieldValue.length();
+				else if (fieldName.equals("content"))
+					contentLen = fieldValue.length();
+				else if (fieldName.equals("desc"))
+					descLen = fieldValue.length();
+				else if (fieldName.equals("audience"))
+					audienceLen += fieldValue.length();
+				else if (fieldName.equals("subject"))
+					subjectLen += fieldValue.length();
 			}
 		}
 
@@ -83,11 +123,25 @@ public class NSDLIndex {
 	public static void computeStatistics() throws Exception {
 		File nsdl_index_dir = new File(NSDL_INDEX_DIR_NAME);
 		IndexReader ir = IndexReader.open(FSDirectory.open(nsdl_index_dir), true);
-		System.out.println("Commit User Data:" + ir.getCommitUserData());
 		IndexSearcher searcher = new IndexSearcher(ir);
-		QueryParser qp = new QueryParser(VERSION, "audience", new StandardAnalyzer(VERSION));
-		TopDocs t = searcher.search(qp.parse("educationLevel:vocational"), 34063);
-		ScoreDoc[] hits = t.scoreDocs;
-		System.out.println("Total Hits:" + t.totalHits + " " + hits[0].doc + " " + hits[32000].doc);
+
+		NumericRangeQuery<Integer> nq1 = NumericRangeQuery.newIntRange("num_subject", 1, 100, true, true);
+		NumericRangeQuery<Integer> nq2 = NumericRangeQuery.newIntRange("num_audience", 1, 1, true, true);
+		NumericRangeQuery<Integer> nq3 = NumericRangeQuery.newIntRange("title_len", 1, 10000, true, true);
+		NumericRangeQuery<Integer> nq4 = NumericRangeQuery.newIntRange("content_len", 1, 100000, true, true);
+		NumericRangeQuery<Integer> nq5 = NumericRangeQuery.newIntRange("desc_len", 1, 100000, true, true);
+
+		BooleanQuery nq = new BooleanQuery();
+		nq.add(nq1, BooleanClause.Occur.MUST);
+		nq.add(nq2, BooleanClause.Occur.MUST);
+		nq.add(nq3, BooleanClause.Occur.MUST);
+		nq.add(nq4, BooleanClause.Occur.MUST);
+		nq.add(nq5, BooleanClause.Occur.MUST);
+
+		//		ScoreDoc[] hits = t.scoreDocs;
+		TopDocs t = searcher.search(nq, 10);
+		System.out.println("Total Hits:" + t.totalHits);
+		searcher.close();
+		ir.close();
 	}
 }
