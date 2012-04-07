@@ -25,7 +25,6 @@ public class StructuredRelevanceModel {
 	Set<Integer> testDocIds;
 	Set<Integer> trainDocIds;
 
-	double[] modelScores;
 	
 	public StructuredRelevanceModel() {
 		allDocIds = new HashSet<Integer>();
@@ -102,49 +101,58 @@ public class StructuredRelevanceModel {
 	}
 	
 	
-	void computePriors(IndexReader ir, Set<Integer> testDocs, Set<Integer> modelDocIds, String fieldName) throws Exception {
+	void computePriors(IndexReader ir, Set<Integer> testDocs, Set<Integer> modelDocs, String fieldName) throws Exception {
 
 		Map<Integer, Integer> doc_length = new HashMap<Integer, Integer>();
-		for (Integer docID : modelDocIds) {
-			TermFreqVector tfVec = ir.getTermFreqVector(docID, "title");
+		for (Integer docID : modelDocs) {
+			TermFreqVector tfVec = ir.getTermFreqVector(docID, fieldName);
 			doc_length.put(docID, tfVec.size());
 		}
 
-		modelScores = new double[modelDocIds.size() * testDocs.size()];
-		for (int i = 0; i < modelScores.length; ++i) {
-			modelScores[i] = 1.0;
+		Map<Integer, Integer> mdToSeqID = new HashMap<Integer, Integer>();
+		Map<Integer, Integer> seqIDToMd = new HashMap<Integer, Integer>();
+		int newMd = 0;
+		for (int md : modelDocs) {
+			mdToSeqID.put(md, newMd);
+			seqIDToMd.put(newMd, md);
+			newMd++;
 		}
 
-		int minMD = Integer.MAX_VALUE;
-		int maxMD = Integer.MIN_VALUE;
-		int mdSize = modelDocIds.size();
-		for (int md : modelDocIds) {
-			minMD = (md < minMD) ? md : minMD;
-			maxMD = (md > minMD) ? md : maxMD;
-		}
-		
-		int minQ = Integer.MAX_VALUE;
-		int maxQ = Integer.MIN_VALUE;
-		int qSize = testDocs.size();
+		Map<Integer, Integer> qToSeqID = new HashMap<Integer, Integer>();
+		Map<Integer, Integer> seqIDToQ = new HashMap<Integer, Integer>();
+		int newQ = 0;
 		for (int q : testDocs) {
-			minQ = (q < minQ) ? q : minQ;
-			maxQ = (q > maxQ) ? q : maxQ;
+			qToSeqID.put(q, newQ);
+			seqIDToQ.put(newQ, q);
+			newMd++;
 		}
-		
+
+		double[] modelScores;
+		modelScores = new double[modelDocs.size() * testDocs.size()];
+		for (int i = 0; i < modelScores.length; ++i)
+			modelScores[i] = 1.0;
+
 		int collectionSize = 0;
 		TermEnum terms = ir.terms();
 		while (terms.next()) {
 			Term t = terms.term();
 			if (!t.field().equals(fieldName) || containsNumber(t.text()))
 				continue;
-			collectionSize++;
+			TermDocs termDocs = ir.termDocs(t);
+			while (termDocs.next()) {
+				int d = termDocs.doc();
+				if (!modelDocs.contains(d))
+					continue;
+				collectionSize += termDocs.freq();
+			}
+			termDocs.close();
 		}
 		terms.close();
 
 		System.out.println("Collection Size: " + collectionSize);
+
 		int[] docsForTerm = new int[testDocs.size()];
 		
-//		int termID = 0;
 		terms = ir.terms();
 		while (terms.next()) {
 
@@ -152,40 +160,30 @@ public class StructuredRelevanceModel {
 			if (!t.field().equals(fieldName) || containsNumber(t.text()))
 				continue;
 
-//			System.out.println("termID: " + termID + "  term: " + t.text());
-//			termID++;
-
-			for (int i = 0; i < docsForTerm.length; ++i) {
+			for (int i = 0; i < docsForTerm.length; ++i)
 				docsForTerm[i] = 1;
-			}
+
 			TermDocs termDocs = ir.termDocs(t);
 			while (termDocs.next()) {
 				if (!testDocs.contains(termDocs.doc()))
 					continue;
-				docsForTerm[termDocs.doc()-minQ] = 0;
+				docsForTerm[qToSeqID.get(termDocs.doc())] = 0;
 			}
 			termDocs.close();
 
-//			long t1 = System.nanoTime();
+			Map<Integer, Double> mle = compute_mlestimate(ir, fieldName, modelDocs, t, doc_length, collectionSize);
 
-			Map<Integer, Double> mle = compute_mlestimate(ir, fieldName, modelDocIds, t, doc_length, collectionSize);
-
-//			long t2 = System.nanoTime();
-//			System.out.println("                Time Taken: " + ((double)(t2-t1)) / 1E9);
-
+			int mdSize = modelDocs.size();
+			int qSize = testDocs.size();
 			double[] val = new double[2];
 			for (int md=0; md < mdSize; ++md) {
-
-				val[0] = mle.get(md+minMD);
+				val[0] = mle.get(seqIDToMd.get(md));
 				val[1] = 1.0 - val[0];
-
 				for (int q = 0; q < qSize; ++q) {
-					modelScores[md*qSize + q] += val[docsForTerm[q]];
+					modelScores[md*qSize + q] *= val[docsForTerm[q]];
 				}
 			}
 
-//			long t3 = System.nanoTime();
-//			System.out.println("Time Taken: " + ((double)(t3-t2)) / 1E9);
 		}
 		terms.close();
 	}
@@ -237,7 +235,6 @@ public class StructuredRelevanceModel {
 		while (termDocs.next()) {
 
 			int d = termDocs.doc();
-
 			if (!modelDocIds.contains(d))
 				continue;
 
