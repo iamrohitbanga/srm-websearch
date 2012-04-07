@@ -33,7 +33,8 @@ public class NSDLIndex {
 		File nsdl_index_dir = new File(NSDL_INDEX_DIR_NAME);
 
 		IndexWriterConfig iwConfig;
-		iwConfig = new IndexWriterConfig(VERSION, new StandardAnalyzer(VERSION));
+		StandardAnalyzer analyzer = new StandardAnalyzer(VERSION);
+		iwConfig = new IndexWriterConfig(VERSION, analyzer);
 
 		IndexWriter iw;
 		iw = new IndexWriter(FSDirectory.open(nsdl_index_dir), iwConfig);
@@ -49,6 +50,7 @@ public class NSDLIndex {
 		int descLen = 0;
 		int audienceLen = 0;
 		int subjectLen = 0;
+		int totalDocs = 0;
 		
 		while ((line = reader.readLine()) != null) {
 
@@ -85,8 +87,11 @@ public class NSDLIndex {
 
 					if (titleLen != 0 && contentLen != 0 && descLen != 0 &&
 						doc.getValues("subject").length > 0 &&
-						doc.getValues("audience").length == 1)
+						doc.getValues("audience").length == 1 && totalDocs < 5000) {
+					
+						totalDocs++;
 						iw.addDocument(doc);
+					}
 
 					titleLen = 0;
 					contentLen = 0;
@@ -116,6 +121,7 @@ public class NSDLIndex {
 		}
 
 		System.out.println(iw.numDocs());
+		analyzer.close();
 		iw.commit();
 		iw.close();
 		reader.close();
