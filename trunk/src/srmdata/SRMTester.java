@@ -10,5 +10,6 @@ public class SRMTester {
 		StructuredRelevanceModel srm;
 		srm = new StructuredRelevanceModel();
 		srm.generateTestTrainSets_1();
+		srm.predictAudience();
 	}
 }

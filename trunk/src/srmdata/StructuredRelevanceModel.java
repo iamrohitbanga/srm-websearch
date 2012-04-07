@@ -2,6 +2,8 @@ package srmdata;
 
 import java.io.File;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -11,6 +13,7 @@ import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.Term;
 import org.apache.lucene.index.TermDocs;
 import org.apache.lucene.index.TermEnum;
+import org.apache.lucene.index.TermFreqVector;
 import org.apache.lucene.search.BooleanClause;
 import org.apache.lucene.search.BooleanQuery;
 import org.apache.lucene.search.IndexSearcher;
@@ -21,9 +24,9 @@ import org.apache.lucene.store.FSDirectory;
 
 public class StructuredRelevanceModel {
 
-	List<Integer> allDocIds;
-	List<Integer> testDocIds;
-	List<Integer> trainDocIds;
+	Set<Integer> allDocIds;
+	Set<Integer> testDocIds;
+	Set<Integer> trainDocIds;
 
 	class TermDocPair {
 		String term;
@@ -54,9 +57,11 @@ public class StructuredRelevanceModel {
 	Map<DocPair, Double> model;
 
 	public StructuredRelevanceModel() {
-		allDocIds = new ArrayList<Integer>();
-		testDocIds = new ArrayList<Integer>();
-		trainDocIds = new ArrayList<Integer>();
+		allDocIds = new HashSet<Integer>();
+		testDocIds = new HashSet<Integer>();
+		trainDocIds = new HashSet<Integer>();
+		probMat = new HashMap<TermDocPair, Double>();
+		model = new HashMap<DocPair, Double>();
 	}
 	
 	void generateTestTrainSets_1() throws Exception {
@@ -103,12 +108,12 @@ public class StructuredRelevanceModel {
 		File nsdl_index_dir = new File(NSDLIndex.NSDL_INDEX_DIR_NAME);
 		IndexReader ir = IndexReader.open(FSDirectory.open(nsdl_index_dir), true);
 
-		computePriors(ir, testDocIds, trainDocIds, "content");
+		computePriors(ir, testDocIds, trainDocIds, "title");
 
 		ir.close();
 	}
 
-	void computePriors(IndexReader ir, List<Integer> testDocs, List<Integer> modelDocIds, String fieldName) throws Exception {
+	void computePriors(IndexReader ir, Set<Integer> testDocs, Set<Integer> modelDocIds, String fieldName) throws Exception {
 
 		TermEnum terms = ir.terms();
 		int collectionSize = 0;
@@ -116,6 +121,10 @@ public class StructuredRelevanceModel {
 		while (terms.next()) {
 
 			Term t = terms.term();
+
+			if (!t.field().equals(fieldName))
+				continue;
+
 			Set<Integer> allDocs = new TreeSet<Integer>(modelDocIds);
 
 			int collectionFreq = 0;
@@ -125,13 +134,21 @@ public class StructuredRelevanceModel {
 			int count = 0;
 			TermDocs termDocs = ir.termDocs(t);
 			while (termDocs.next()) {
-				int d = termDocs.doc();
-				int tf = termDocs.freq();
-				int dl = ir.getTermFreqVector(d, fieldName).size();
 
-				double pml = ((double)tf) / dl;
-				pavg = pavg + pml;
-				meanfreq = meanfreq + tf;
+				int d = termDocs.doc();
+
+				if (!allDocIds.contains(d))
+					continue;
+
+				int tf = termDocs.freq();
+				TermFreqVector tfv = ir.getTermFreqVector(d,fieldName);
+
+				if (tfv != null) {
+					int dl = tfv.size();
+					double pml = ((double)tf) / dl;
+					pavg = pavg + pml;
+					meanfreq = meanfreq + tf;
+				}
 
 				collectionFreq = collectionFreq + tf;
 				++count;
@@ -144,6 +161,10 @@ public class StructuredRelevanceModel {
 			termDocs = ir.termDocs(t);
 			while (termDocs.next()) {
 				int d = termDocs.doc();
+
+				if (!allDocIds.contains(d))
+					continue;
+
 				int tf = termDocs.freq();
 				int dl = ir.getTermFreqVector(d, fieldName).size();
 
@@ -151,6 +172,7 @@ public class StructuredRelevanceModel {
 				double pml = ((double)tf) / dl;
 				double prob = Math.pow(pml, 1.0 - R) * Math.pow(pavg, R);
 
+				System.out.println(t.field() + "   :   " + t.text() + "		prob:" + prob);
 				probMat.put(new TermDocPair(t.text(),d), prob);
 				allDocs.remove(d);
 			}
@@ -159,6 +181,7 @@ public class StructuredRelevanceModel {
 			collectionFreq = -collectionFreq;
 			// docs in which the term does not occur
 			for (Integer d : allDocs) {
+				System.out.println(t.field() + "   :   " + t.text() + "		prob:" + collectionFreq);
 				probMat.put(new TermDocPair(t.text(),d), (double)collectionFreq);
 			}
 			++collectionSize;
@@ -169,12 +192,34 @@ public class StructuredRelevanceModel {
 		terms = ir.terms();
 
 		while (terms.next()) {
+
 			Term t = terms.term();
-			TermDocs termDocs = ir.termDocs(t);
+
 			List<Integer> docsForTerm = new ArrayList<Integer>();
-			while (termDocs.next()) {
+			TermDocs termDocs = ir.termDocs(t);
+			while (termDocs.next())
 				docsForTerm.add(termDocs.doc());
+
+			for (Integer md : modelDocIds) {
+				double val = probMat.get(new TermDocPair(t.text(), md));
+				if (val < 0)
+					val = -val/collectionSize;
+
+				for (Integer q : testDocIds) {
+					DocPair dp = new DocPair(q, md);
+					Double prob = model.get(dp);
+					if (prob == null) {
+						prob = 1.0;
+						model.put(dp, prob);
+					}
+					if (!docsForTerm.contains(q))
+						val = 1.0 - val;
+					assert (val >= 0.0 && val <= 1.0);
+					prob = prob * val;
+					model.put(dp, prob);
+				}
 			}
+
 		}
 		terms.close();
 	}

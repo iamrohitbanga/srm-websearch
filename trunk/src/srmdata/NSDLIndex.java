@@ -13,12 +13,10 @@ import org.apache.lucene.document.NumericField;
 import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.IndexWriter;
 import org.apache.lucene.index.IndexWriterConfig;
-import org.apache.lucene.queryParser.QueryParser;
 import org.apache.lucene.search.BooleanClause;
 import org.apache.lucene.search.BooleanQuery;
 import org.apache.lucene.search.IndexSearcher;
 import org.apache.lucene.search.NumericRangeQuery;
-import org.apache.lucene.search.ScoreDoc;
 import org.apache.lucene.search.TopDocs;
 import org.apache.lucene.store.FSDirectory;
 import org.apache.lucene.util.NumericUtils;
@@ -100,7 +98,7 @@ public class NSDLIndex {
 				assert (index != -1);
 				String fieldName = line.substring(0,index);
 				String fieldValue = line.substring(index+2);
-				doc.add(new Field(fieldName, fieldValue, Store.YES, Index.ANALYZED));
+				doc.add(new Field(fieldName, fieldValue, Store.YES, Index.ANALYZED, Field.TermVector.YES));
 				if (fieldName.equals("title"))
 					titleLen = fieldValue.length();
 				else if (fieldName.equals("content"))
