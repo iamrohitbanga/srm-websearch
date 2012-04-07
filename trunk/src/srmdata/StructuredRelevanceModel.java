@@ -1,10 +1,12 @@
 package srmdata;
 
 import java.io.File;
+import java.lang.reflect.Array;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 
 import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.Term;
@@ -42,6 +44,8 @@ public class StructuredRelevanceModel {
 		}
 	};
 
+	double[] modelScores;
+	
 	class DocPair {
 		int d1;
 		int d2;
@@ -52,7 +56,7 @@ public class StructuredRelevanceModel {
 		
 		@Override
 		public int hashCode() {
-			int hash = 23;
+			int hash = 3571;
 			hash = hash * 31 + d1;
 			hash = hash * 31 + d2;
 			return hash;
@@ -70,9 +74,9 @@ public class StructuredRelevanceModel {
 		allDocIds = new HashSet<Integer>();
 		testDocIds = new HashSet<Integer>();
 		trainDocIds = new HashSet<Integer>();
-		model = new HashMap<DocPair, Double>();
+		model = new TreeMap<DocPair, Double>();
 	}
-	
+
 	void generateTestTrainSets_1() throws Exception {
 
 		File nsdl_index_dir = new File(NSDLIndex.NSDL_INDEX_DIR_NAME);
@@ -139,6 +143,11 @@ public class StructuredRelevanceModel {
 			doc_length.put(docID, tfVec.size());
 		}
 
+		modelScores = new double[modelDocIds.size() * testDocIds.size()];
+		for (int i = 0; i < modelScores.length; ++i) {
+			modelScores[i] = 1.0;
+		}
+		
 		int collectionSize = 0;
 		TermEnum terms = ir.terms();
 		while (terms.next()) {
@@ -158,34 +167,23 @@ public class StructuredRelevanceModel {
 			if (!t.field().equals(fieldName) || containsNumber(t.text()))
 				continue;
 
-			System.out.println("term: " + t.text());
+//			System.out.println("term: " + t.text());
 			TermDocs termDocs = ir.termDocs(t);
 			Set<Integer> docsForTerm = new HashSet<Integer>();
 			while (termDocs.next())
 				docsForTerm.add(termDocs.doc());
 			termDocs.close();
 
-			Double pavg = 0.0;
-			Double meanfreq = 0.0;
-			compute_avgs(ir, fieldName, modelDocIds, t, pavg, meanfreq);
-			System.out.println("pavg: " + pavg + " meanfreq: " + meanfreq);
-			
+			long t1 = System.nanoTime();
+			Map<Integer, Double> mle = compute_mlestimate(ir, fieldName, modelDocIds, t, doc_length, collectionSize);
+			DocPair dp = new DocPair(1, 1);
+			long t2 = System.nanoTime();
+			System.out.println("                Time Taken: " + ((double)(t2-t1)) / 1E9);
 			for (Integer md : modelDocIds) {
-				int tf = compute_mlestimate(ir, fieldName, modelDocIds, t, md);
-
-				double R = Math.pow((meanfreq/(1.0+meanfreq)),tf)/(1.0+meanfreq);
-				double pml = ((double)tf) / doc_length.get(md);
-
-				double val = 0.0;
-				if (tf < 0) {
-					val = -tf / collectionSize;
-				}
-				else {
-					val = Math.pow(pml, 1.0-R) * Math.pow(pavg, R);
-				}
-
-				for (Integer q : testDocIds) {
-					DocPair dp = new DocPair(q, md);
+				double val = mle.get(md);
+				dp.d2 = md;
+				for (Integer q : testDocs) {
+					dp.d1 = q;
 					Double prob = model.get(dp);
 					if (prob == null) {
 						prob = 1.0;
@@ -193,23 +191,27 @@ public class StructuredRelevanceModel {
 					}
 					if (!docsForTerm.contains(q))
 						val = 1.0 - val;
-					assert (val >= 0.0 && val <= 1.0);
 					prob = prob * val;
 					model.put(dp, prob);
 				}
-//				if ((model.size() / 1000) % 100 == 0 && n > 0)
-//					System.out.println("Model Size: " + model.size() + " new entries: " + n);
 			}
+			long t3 = System.nanoTime();
+			System.out.println("Time Taken: " + ((double)(t3-t2)) / 1E9);
 		}
 		terms.close();
 	}
 
-	private int compute_mlestimate(IndexReader ir, String fieldName, Set<Integer> modelDocIds, Term t, Integer md) throws Exception {
+	private Map<Integer,Double> compute_mlestimate(IndexReader ir, String fieldName,
+			Set<Integer> modelDocIds, Term t, Map<Integer, Integer> doc_length, int collectionSize) throws Exception {
 
-		int collectionFreq = 0;
-		long t1 = System.nanoTime();
+		Double pavg = 0.0;
+		Double meanfreq = 0.0;
+		Integer collectionFreq = 0;
+		compute_avgs(ir, fieldName, modelDocIds, t, pavg, meanfreq, collectionFreq);
 
-		int termFreq = -1;
+		Map<Integer,Double> mlEstimates = new HashMap<Integer, Double>();
+//		long t1 = System.nanoTime();
+
 		TermDocs termDocs = ir.termDocs(t);
 		while (termDocs.next()) {
 
@@ -219,29 +221,30 @@ public class StructuredRelevanceModel {
 				continue;
 
 			int tf = termDocs.freq();
-			if (d == md) {
-				termFreq = tf;
-				break;
-			}
-
-			collectionFreq = collectionFreq + tf;
+			double R = Math.pow((meanfreq/(1.0+meanfreq)),tf)/(1.0+meanfreq);
+			double pml = ((double)tf) / doc_length.get(d);
+			double val = Math.pow(pml, 1.0-R) * Math.pow(pavg, R);
+			mlEstimates.put(d, val);
 		}
 		termDocs.close();
 
-		if (termFreq == 0)
-			return -collectionFreq;
+		double defaultVal = ((double)collectionFreq) / collectionSize;
+		for (Integer md : modelDocIds) {
+			if (!mlEstimates.containsKey(md))
+				mlEstimates.put(md, defaultVal);
+		}
+		
+//		long t2 = System.nanoTime();
+//		System.out.println("Time taken: " + ((double)(t2-t1)) / 1E9 );
 
-		long t2 = System.nanoTime();
-		System.out.println("Time taken: " + ((double)(t2-t1)) / 1E9 );
-
-		return termFreq;
+		return mlEstimates;
 	}
 
 	private void compute_avgs(IndexReader ir, String fieldName,
 			Set<Integer> modelDocIds, Term t,
-			Double pavg, Double meanfreq) throws Exception {
+			Double pavg, Double meanfreq, Integer collectionFreq) throws Exception {
 
-		int collectionFreq = 0;
+		collectionFreq = 0;
 		pavg = 0.0;
 		meanfreq = 0.0;
 
