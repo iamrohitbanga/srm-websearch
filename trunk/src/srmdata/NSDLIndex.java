@@ -70,12 +70,6 @@ public class NSDLIndex {
 							NumericUtils.PRECISION_STEP_DEFAULT,
 							Store.YES, true).setDoubleValue(((double)subjectLen) / doc.getValues("subject").length));
 
-					titleLen = 0;
-					contentLen = 0;
-					descLen = 0;
-					audienceLen = 0;
-					subjectLen = 0;
-
 					doc.add(new NumericField("num_audience",
 							NumericUtils.PRECISION_STEP_DEFAULT,
 							Store.YES, true).setIntValue(doc.getValues("audience").length));
@@ -89,7 +83,16 @@ public class NSDLIndex {
 							NumericUtils.PRECISION_STEP_DEFAULT,
 							Store.YES, true).setIntValue(doc.getValues("sub").length));
 
-					iw.addDocument(doc);
+					if (titleLen != 0 && contentLen != 0 && descLen != 0 &&
+						doc.getValues("subject").length > 0 &&
+						doc.getValues("audience").length == 1)
+						iw.addDocument(doc);
+
+					titleLen = 0;
+					contentLen = 0;
+					descLen = 0;
+					audienceLen = 0;
+					subjectLen = 0;
 				}
 				doc = new Document();
 			}
@@ -126,7 +129,7 @@ public class NSDLIndex {
 		NumericRangeQuery<Integer> nq1 = NumericRangeQuery.newIntRange("num_subject", 1, 100, true, true);
 		NumericRangeQuery<Integer> nq2 = NumericRangeQuery.newIntRange("num_audience", 1, 1, true, true);
 		NumericRangeQuery<Integer> nq3 = NumericRangeQuery.newIntRange("title_len", 1, 10000, true, true);
-		NumericRangeQuery<Integer> nq4 = NumericRangeQuery.newIntRange("content_len", 1, 100000, true, true);
+		NumericRangeQuery<Integer> nq4 = NumericRangeQuery.newIntRange("content_len", 1, 10000000, true, true);
 		NumericRangeQuery<Integer> nq5 = NumericRangeQuery.newIntRange("desc_len", 1, 100000, true, true);
 
 		BooleanQuery nq = new BooleanQuery();

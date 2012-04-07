@@ -137,42 +137,39 @@ public class StructuredRelevanceModel {
 
 				int d = termDocs.doc();
 
-				if (!allDocIds.contains(d))
+				if (!modelDocIds.contains(d))
 					continue;
 
 				int tf = termDocs.freq();
-				TermFreqVector tfv = ir.getTermFreqVector(d,fieldName);
+				TermFreqVector tfv = ir.getTermFreqVector(d, fieldName);
 
-				if (tfv != null) {
-					int dl = tfv.size();
-					double pml = ((double)tf) / dl;
-					pavg = pavg + pml;
-					meanfreq = meanfreq + tf;
-				}
+				int dl = tfv.size();
+				double pml = ((double)tf) / dl;
+				pavg = pavg + pml;
+				meanfreq = meanfreq + tf;
 
 				collectionFreq = collectionFreq + tf;
-				++count;
+				count++;
 			}
 			termDocs.close();
-			assert (count == ir.docFreq(t));
-			pavg = pavg / ir.docFreq(t);
-			meanfreq = meanfreq / ir.docFreq(t);
+
+			pavg = pavg / count;
+			meanfreq = meanfreq / count;
 
 			termDocs = ir.termDocs(t);
 			while (termDocs.next()) {
 				int d = termDocs.doc();
 
-				if (!allDocIds.contains(d))
+				if (!modelDocIds.contains(d))
 					continue;
 
 				int tf = termDocs.freq();
 				int dl = ir.getTermFreqVector(d, fieldName).size();
 
-				double R = (1.0 / (1.0 + meanfreq)) * Math.pow((meanfreq / (1+meanfreq)), tf);
+				double R = (1.0 / (1.0 + meanfreq)) * Math.pow((meanfreq / (1.0+meanfreq)), tf);
 				double pml = ((double)tf) / dl;
-				double prob = Math.pow(pml, 1.0 - R) * Math.pow(pavg, R);
+				double prob = Math.pow(pml, 1.0-R) * Math.pow(pavg, R);
 
-				System.out.println(t.field() + "   :   " + t.text() + "		prob:" + prob);
 				probMat.put(new TermDocPair(t.text(),d), prob);
 				allDocs.remove(d);
 			}
@@ -181,14 +178,16 @@ public class StructuredRelevanceModel {
 			collectionFreq = -collectionFreq;
 			// docs in which the term does not occur
 			for (Integer d : allDocs) {
-				System.out.println(t.field() + "   :   " + t.text() + "		prob:" + collectionFreq);
 				probMat.put(new TermDocPair(t.text(),d), (double)collectionFreq);
 			}
 			++collectionSize;
+//			if (collectionSize == 2257)
+				System.out.println("Collection Size: "  + collectionSize + "   Probmat Size: " + probMat.size());
 		}
-
 		terms.close();
 
+		System.out.println("here");
+		
 		terms = ir.terms();
 
 		while (terms.next()) {
