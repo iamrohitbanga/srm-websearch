@@ -19,6 +19,10 @@ import org.apache.lucene.search.ScoreDoc;
 import org.apache.lucene.search.TopDocs;
 import org.apache.lucene.store.FSDirectory;
 
+import com.google.common.base.Functions;
+import com.google.common.collect.ImmutableSortedMap;
+import com.google.common.collect.Ordering;
+
 /*
  * To change - Ease constraints to include records with multiple audience, education level and subject in train/test data sets
  * Shuffle records into training and test sets randomly
@@ -36,11 +40,7 @@ public class SRM
 	float titleWeight = 0.9f;
 	float contentWeight = 0.6f;
 	float descWeight = 0.7f;
-	
-	Map <String , Float> audienceVocabularyScore;
-	Map <String , Float> subjectVocabularyScore;
-	Map <String , Float> educationVocabularyScore;
-	
+		
 	Map <Integer , Float> contentScore;
 	Map <Integer , Float> descriptionScore;
 	Map <Integer , Float> titleScore;
@@ -63,6 +63,10 @@ public class SRM
 		String tempToken;
 		int titleNI, contentNI, descNI;
 		double titleSimScore , descSimScore, contentSimScore, simScore;
+		
+		Map <String , Double> audienceVocabularyScore = new HashMap<String , Double>();
+		Map <String , Double> subjectVocabularyScore = new HashMap<String , Double>();
+		Map <String , Double> educationVocabularyScore = new HashMap<String , Double>();
 				
 		Document doc;
 		
@@ -78,6 +82,9 @@ public class SRM
 			rTitle = doc.get("title");
 			rContent = doc.get("content");
 			rDesc = doc.get("desc");
+			
+			System.out.println("Query audience : " + doc.get("audience"));
+			System.out.println("Quer subject : " + doc.get("subject"));
 			
 			// Iterate over all training records to find the score of train , test document pair
 			Iterator <Integer> trainIterator = trainDocIds.iterator();
@@ -201,10 +208,44 @@ public class SRM
 				
 				/****************** Computer overall similarity score - Cross entropy **********************/
 				simScore = titleWeight * titleSimScore + contentWeight * contentSimScore + descWeight * descSimScore;
-				System.out.println("Sim " + simScore);
-							
-			}
+				//System.out.println("Sim " + simScore);
 				
+				// Update the audience vocabulary Score
+				sTokenizer = new StringTokenizer(doc.get("audience"));
+				while(sTokenizer.hasMoreTokens())
+				{
+					tempToken = sTokenizer.nextToken();
+					if (audienceVocabularyScore.containsKey(tempToken))
+					{
+						audienceVocabularyScore.put(tempToken, audienceVocabularyScore.get(tempToken) + simScore);
+					}
+					else
+						audienceVocabularyScore.put(tempToken , simScore);
+				}
+				
+				// Update the subject Vocabulary Score
+				sTokenizer = new StringTokenizer(doc.get("subject"));
+				while(sTokenizer.hasMoreTokens())
+				{
+					tempToken = sTokenizer.nextToken();
+					if (subjectVocabularyScore.containsKey(tempToken))
+					{
+						subjectVocabularyScore.put(tempToken, subjectVocabularyScore.get(tempToken) + simScore);
+					}
+					else
+						subjectVocabularyScore.put(tempToken , simScore);
+				}
+				
+			}
+			// Display the sorted audience vocabulary
+			Ordering valueComparator = Ordering.natural().onResultOf(Functions.forMap(audienceVocabularyScore)).compound(Ordering.natural());
+			ImmutableSortedMap audienceVocabSortedMap = ImmutableSortedMap.copyOf(audienceVocabularyScore, valueComparator);
+			System.out.println(audienceVocabSortedMap); 
+			
+			/* // Display the sorted vocabulary
+			Ordering valueComparator = Ordering.natural().onResultOf(Functions.forMap(subjectVocabularyScore)).compound(Ordering.natural());
+			ImmutableSortedMap subjectVocabSortedMap = ImmutableSortedMap.copyOf(subjectVocabularyScore, valueComparator);
+			System.out.println(subjectVocabSortedMap); */
 		} 
 		catch (CorruptIndexException e) {
 			// TODO Auto-generated catch block
@@ -273,6 +314,7 @@ public class SRM
 	public static void main(String [] args)
 	{
 		SRM srmModel = new SRM();
+		int count = 0;
 		try 
 		{
 			srmModel.generateTestTrainSets();
@@ -280,8 +322,9 @@ public class SRM
 			// For each field - content, title, desc of all documents in testing set query the training set and find probability score of each documnet
 			Iterator <Integer> testIterator = srmModel.testDocIds.iterator();
 			
-			if (testIterator.hasNext())
+			while (testIterator.hasNext() && count < 100)
 			{
+				count++;
 				srmModel.calculateDeltaKernelScore((Integer)testIterator.next());
 				System.out.println(" Test Id:" + srmModel.testDocIds);
 			}
