@@ -87,7 +87,7 @@ public class NSDLIndex {
 
 					if (titleLen != 0 && contentLen != 0 && descLen != 0 &&
 						doc.getValues("subject").length > 0 &&
-						doc.getValues("audience").length == 1 && totalDocs < 5000) {
+						doc.getValues("audience").length == 1 && totalDocs < 20000) {
 					
 						totalDocs++;
 						iw.addDocument(doc);
