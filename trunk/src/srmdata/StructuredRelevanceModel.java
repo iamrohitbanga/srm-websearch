@@ -1,13 +1,10 @@
 package srmdata;
 
 import java.io.File;
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.TreeSet;
 
 import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.Term;
@@ -37,9 +34,10 @@ public class StructuredRelevanceModel {
 			docID = d;
 		}
 
-		public boolean equals(Object a, Object b) {
+		@Override
+		public boolean equals(Object a) {
 			TermDocPair td1 = (TermDocPair) a;
-			TermDocPair td2 = (TermDocPair) b;
+			TermDocPair td2 = (TermDocPair) this;
 			return (td1.term.equals(td2.term) && td1.docID == td2.docID);
 		}
 	};
@@ -51,16 +49,27 @@ public class StructuredRelevanceModel {
 			d1 = doc1;
 			d2 = doc2;
 		}
+		
+		@Override
+		public int hashCode() {
+			int hash = 23;
+			hash = hash * 31 + d1;
+			hash = hash * 31 + d2;
+			return hash;
+		}
+
+		@Override
+		public boolean equals(Object o) {
+			return (d1 == ((DocPair) o).d1 && d2 == ((DocPair) o).d2);
+		}
 	};
-	
-	Map<TermDocPair, Double> probMat;
+
 	Map<DocPair, Double> model;
 
 	public StructuredRelevanceModel() {
 		allDocIds = new HashSet<Integer>();
 		testDocIds = new HashSet<Integer>();
 		trainDocIds = new HashSet<Integer>();
-		probMat = new HashMap<TermDocPair, Double>();
 		model = new HashMap<DocPair, Double>();
 	}
 	
@@ -113,96 +122,67 @@ public class StructuredRelevanceModel {
 		ir.close();
 	}
 
+	boolean containsNumber(String str) {
+		for (int i = 0; i < str.length(); ++i) {
+			if (str.charAt(i) >= '0' && str.charAt(i) <= '9')
+				return true;
+		}
+		return false;
+	}
+	
+	
 	void computePriors(IndexReader ir, Set<Integer> testDocs, Set<Integer> modelDocIds, String fieldName) throws Exception {
 
-		TermEnum terms = ir.terms();
+		Map<Integer, Integer> doc_length = new HashMap<Integer, Integer>();
+		for (Integer docID : trainDocIds) {
+			TermFreqVector tfVec = ir.getTermFreqVector(docID, "title");
+			doc_length.put(docID, tfVec.size());
+		}
+
 		int collectionSize = 0;
-		
+		TermEnum terms = ir.terms();
 		while (terms.next()) {
-
 			Term t = terms.term();
-
-			if (!t.field().equals(fieldName))
+			if (!t.field().equals(fieldName) || containsNumber(t.text()))
 				continue;
-
-			Set<Integer> allDocs = new TreeSet<Integer>(modelDocIds);
-
-			int collectionFreq = 0;
-			double pavg = 0;
-			double meanfreq = 0;
-
-			int count = 0;
-			TermDocs termDocs = ir.termDocs(t);
-			while (termDocs.next()) {
-
-				int d = termDocs.doc();
-
-				if (!modelDocIds.contains(d))
-					continue;
-
-				int tf = termDocs.freq();
-				TermFreqVector tfv = ir.getTermFreqVector(d, fieldName);
-
-				int dl = tfv.size();
-				double pml = ((double)tf) / dl;
-				pavg = pavg + pml;
-				meanfreq = meanfreq + tf;
-
-				collectionFreq = collectionFreq + tf;
-				count++;
-			}
-			termDocs.close();
-
-			pavg = pavg / count;
-			meanfreq = meanfreq / count;
-
-			termDocs = ir.termDocs(t);
-			while (termDocs.next()) {
-				int d = termDocs.doc();
-
-				if (!modelDocIds.contains(d))
-					continue;
-
-				int tf = termDocs.freq();
-				int dl = ir.getTermFreqVector(d, fieldName).size();
-
-				double R = (1.0 / (1.0 + meanfreq)) * Math.pow((meanfreq / (1.0+meanfreq)), tf);
-				double pml = ((double)tf) / dl;
-				double prob = Math.pow(pml, 1.0-R) * Math.pow(pavg, R);
-
-				probMat.put(new TermDocPair(t.text(),d), prob);
-				allDocs.remove(d);
-			}
-			termDocs.close();
-
-			collectionFreq = -collectionFreq;
-			// docs in which the term does not occur
-			for (Integer d : allDocs) {
-				probMat.put(new TermDocPair(t.text(),d), (double)collectionFreq);
-			}
-			++collectionSize;
-//			if (collectionSize == 2257)
-				System.out.println("Collection Size: "  + collectionSize + "   Probmat Size: " + probMat.size());
+			collectionSize++;
 		}
 		terms.close();
 
-		System.out.println("here");
+		System.out.println("Collection Size: " + collectionSize);
 		
 		terms = ir.terms();
-
 		while (terms.next()) {
 
 			Term t = terms.term();
+			if (!t.field().equals(fieldName) || containsNumber(t.text()))
+				continue;
 
-			List<Integer> docsForTerm = new ArrayList<Integer>();
+			System.out.println("term: " + t.text());
 			TermDocs termDocs = ir.termDocs(t);
+			Set<Integer> docsForTerm = new HashSet<Integer>();
 			while (termDocs.next())
 				docsForTerm.add(termDocs.doc());
+			termDocs.close();
 
+			Double pavg = 0.0;
+			Double meanfreq = 0.0;
+			compute_avgs(ir, fieldName, modelDocIds, t, pavg, meanfreq);
+			System.out.println("pavg: " + pavg + " meanfreq: " + meanfreq);
+			
 			for (Integer md : modelDocIds) {
-				double val = probMat.get(new TermDocPair(t.text(), md));
-				if (val < 0)
-					val = -val/collectionSize;
+				int tf = compute_mlestimate(ir, fieldName, modelDocIds, t, md);
+
+				double R = Math.pow((meanfreq/(1.0+meanfreq)),tf)/(1.0+meanfreq);
+				double pml = ((double)tf) / doc_length.get(md);
+
+				double val = 0.0;
+				if (tf < 0) {
+					val = -tf / collectionSize;
+				}
+				else {
+					val = Math.pow(pml, 1.0-R) * Math.pow(pavg, R);
+				}
 
 				for (Integer q : testDocIds) {
 					DocPair dp = new DocPair(q, md);
@@ -217,9 +197,78 @@ public class StructuredRelevanceModel {
 					prob = prob * val;
 					model.put(dp, prob);
 				}
+//				if ((model.size() / 1000) % 100 == 0 && n > 0)
+//					System.out.println("Model Size: " + model.size() + " new entries: " + n);
 			}
-
 		}
 		terms.close();
 	}
+
+	private int compute_mlestimate(IndexReader ir, String fieldName, Set<Integer> modelDocIds, Term t, Integer md) throws Exception {
+
+		int collectionFreq = 0;
+		long t1 = System.nanoTime();
+
+		int termFreq = -1;
+		TermDocs termDocs = ir.termDocs(t);
+		while (termDocs.next()) {
+
+			int d = termDocs.doc();
+
+			if (!modelDocIds.contains(d))
+				continue;
+
+			int tf = termDocs.freq();
+			if (d == md) {
+				termFreq = tf;
+				break;
+			}
+
+			collectionFreq = collectionFreq + tf;
+		}
+		termDocs.close();
+
+		if (termFreq == 0)
+			return -collectionFreq;
+
+		long t2 = System.nanoTime();
+		System.out.println("Time taken: " + ((double)(t2-t1)) / 1E9 );
+
+		return termFreq;
+	}
+
+	private void compute_avgs(IndexReader ir, String fieldName,
+			Set<Integer> modelDocIds, Term t,
+			Double pavg, Double meanfreq) throws Exception {
+
+		int collectionFreq = 0;
+		pavg = 0.0;
+		meanfreq = 0.0;
+
+		int count = 0;
+		TermDocs termDocs = ir.termDocs(t);
+		while (termDocs.next()) {
+
+			int d = termDocs.doc();
+
+			if (!modelDocIds.contains(d))
+				continue;
+
+			int tf = termDocs.freq();
+			TermFreqVector tfv = ir.getTermFreqVector(d, fieldName);
+
+			int dl = tfv.size();
+			double pml = ((double)tf) / dl;
+			pavg = pavg + pml;
+			meanfreq = meanfreq + tf;
+
+			collectionFreq = collectionFreq + tf;
+			count++;
+		}
+		termDocs.close();
+
+		pavg = pavg / count;
+		meanfreq = meanfreq / count;
+	}
+
 }
