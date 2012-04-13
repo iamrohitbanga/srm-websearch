@@ -1,8 +1,12 @@
 package srmdata;
 
 import java.io.File;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
-import java.util.HashSet;
+import java.util.Iterator;
+import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
 
@@ -22,14 +26,14 @@ import org.apache.lucene.store.FSDirectory;
 public class StructuredRelevanceModel {
 
 	Set<Integer> allDocIds;
-	Set<Integer> testDocIds;
+	LinkedHashSet<Integer> testDocIds;
 	Set<Integer> trainDocIds;
 
 	
 	public StructuredRelevanceModel() {
-		allDocIds = new HashSet<Integer>();
-		testDocIds = new HashSet<Integer>();
-		trainDocIds = new HashSet<Integer>();
+		allDocIds = new LinkedHashSet<Integer>();
+		testDocIds = new LinkedHashSet<Integer>();
+		trainDocIds = new LinkedHashSet<Integer>();
 	}
 
 	void generateTestTrainSets_1() throws Exception {
@@ -53,6 +57,7 @@ public class StructuredRelevanceModel {
 
 		TopDocs t = searcher.search(nq, 20000);
 		ScoreDoc[] hits = t.scoreDocs;
+		Collections.shuffle(Arrays.asList(hits));
 		double testTrainRatio = 0.8;
 		int maxTrain = (int) (testTrainRatio * hits.length);
 		for (int i = 0; i < hits.length; ++i) {
@@ -71,27 +76,83 @@ public class StructuredRelevanceModel {
 		ir.close();
 	}
 
+	class Score {
+		Double score;
+		Integer docID;
+	}
+
 	void predictAudience() throws Exception {
 
 		File nsdl_index_dir = new File(NSDLIndex.NSDL_INDEX_DIR_NAME);
 		IndexReader ir = IndexReader.open(FSDirectory.open(nsdl_index_dir), true);
 
+		int num_fields = 3;
+		double[][] scores = new double[num_fields][]; 
 		long t1 = System.nanoTime();
-			computePriors(ir, testDocIds, trainDocIds, "title");
+			 scores[0] = computePriors(ir, testDocIds, trainDocIds, "title");
 		long t2 = System.nanoTime();
 		System.out.println("                Time Taken: " + ((double)(t2-t1)) / 1E9);
 
-			computePriors(ir, testDocIds, trainDocIds, "desc");
+			scores[1] = computePriors(ir, testDocIds, trainDocIds, "desc");
 		long t3 = System.nanoTime();
 		System.out.println("                Time Taken: " + ((double)(t3-t2)) / 1E9);
 
-			computePriors(ir, testDocIds, trainDocIds, "content");
+			scores[2] = computePriors(ir, testDocIds, trainDocIds, "content");
 		long t4 = System.nanoTime();
 		System.out.println("                Time Taken: " + ((double)(t4-t3)) / 1E9);
+
+		Score[][] combined_score = new Score[testDocIds.size()][trainDocIds.size()];
+
+		for (int i = 0; i < combined_score.length; ++i) {
+			for (int j = 0; j < combined_score[i].length; ++j) {
+				combined_score[i][j] = new Score();
+			}
+		}
+
+		for (int i = 0; i < scores[0].length; ++i) {
+
+			int x, y;
+			x = i / testDocIds.size();
+			y = i % testDocIds.size();
+
+			combined_score[y][x].score = scores[0][i] * scores[1][i] * scores[2][i];
+			combined_score[y][x].docID = x; 
+//			System.out.println(" (" + i + "," + combined_score[i] + "," + scores[0][i]
+//					+ "," + scores[1][i] + "," + scores[2][i] + ") ");
+		}
+//		System.out.println();
+
+		for (int i = 0; i < testDocIds.size(); ++i) {
+			Arrays.sort(combined_score[i], new DescendingComp());
+		}
+
+		Iterator<Integer> iter = testDocIds.iterator();
+		for (int i = 0; i < 5; ++i) {
+			System.out.println("for test doc: " + iter.next());
+			for (int j = 0; j < 100; ++j) {
+				System.out.println(" (" + i + "," + combined_score[i][j].docID + "," + combined_score[i][j].score + ") ");
+			}
+			System.out.println();
+			System.out.println();
+		}
 
 		ir.close();
 	}
 
+	private static class DescendingComp implements Comparator<Score> {
+
+		@Override
+		public int compare(Score o1, Score o2) {
+		
+			Double diff = o2.score-o1.score;
+			if (diff < 0)
+				return -1;
+			if (diff > 0)
+				return 1;
+			return 0;
+		}
+	}
+	
 	boolean containsNumber(String str) {
 		for (int i = 0; i < str.length(); ++i) {
 			if (str.charAt(i) >= '0' && str.charAt(i) <= '9')
@@ -101,7 +162,7 @@ public class StructuredRelevanceModel {
 	}
 	
 	
-	void computePriors(IndexReader ir, Set<Integer> testDocs, Set<Integer> modelDocs, String fieldName) throws Exception {
+	double[] computePriors(IndexReader ir, Set<Integer> testDocs, Set<Integer> modelDocs, String fieldName) throws Exception {
 
 		Map<Integer, Integer> doc_length = new HashMap<Integer, Integer>();
 		for (Integer docID : modelDocs) {
@@ -186,6 +247,7 @@ public class StructuredRelevanceModel {
 
 		}
 		terms.close();
+		return modelScores;
 	}
 
 	private Map<Integer,Double> compute_mlestimate(IndexReader ir, String fieldName,

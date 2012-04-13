@@ -7,5 +7,7 @@
 			<attribute name="javadoc_location" value="http://lucene.apache.org/core/old_versioned_docs/versions/3_5_0/api/core/"/>
 		</attributes>
 	</classpathentry>
+	<classpathentry kind="lib" path="/home/iamrohitbanga/websearch/project/lib/lucene-3.5.0/contrib/analyzers/common/lucene-analyzers-3.5.0.jar"/>
+	<classpathentry kind="lib" path="/home/iamrohitbanga/websearch/project/lib/lucene-3.5.0/contrib/memory/lucene-memory-3.5.0.jar"/>
 	<classpathentry kind="output" path="bin"/>
 </classpath>

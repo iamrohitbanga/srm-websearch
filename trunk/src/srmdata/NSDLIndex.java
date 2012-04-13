@@ -26,11 +26,45 @@ public class NSDLIndex {
 
 	public static String NSDL_FILE_NAME = "../../data/nsdl/nsdl.info";
 	public static String NSDL_INDEX_DIR_NAME = "../../index/";
+	public static String NSDL_GLOBAL_INDEX_DIR_NAME = "../../global_index/";
 	public static Version VERSION = Version.LUCENE_35;
 
-	public static void createIndex() throws Exception {
+	public static void createSmallIndex() throws Exception {
 
+		File nsdl_global_index_dir = new File(NSDL_GLOBAL_INDEX_DIR_NAME);
+		IndexReader ir = IndexReader.open(FSDirectory.open(nsdl_global_index_dir), true);
+		
 		File nsdl_index_dir = new File(NSDL_INDEX_DIR_NAME);
+
+		IndexWriterConfig iwConfig;
+		StandardAnalyzer analyzer = new StandardAnalyzer(VERSION);
+		iwConfig = new IndexWriterConfig(VERSION, analyzer);
+
+		IndexWriter iw;
+		iw = new IndexWriter(FSDirectory.open(nsdl_index_dir), iwConfig);
+		iw.deleteAll();
+
+		int totalDocs = ir.maxDoc();
+		for (int i = 0; i < totalDocs; i++) {
+			Document doc = ir.document(i);
+			String audience = doc.get("audience");
+			if (audience.equalsIgnoreCase("learner") || audience.equalsIgnoreCase("educator")) {
+				if (Math.random() < 0.3)
+					iw.addDocument(doc);
+			}
+			else {
+				iw.addDocument(doc);
+			}
+		}
+		
+		ir.close();
+		iw.commit();
+		iw.close();
+	}
+	
+	public static void createGlobalIndex() throws Exception {
+
+		File nsdl_index_dir = new File(NSDL_GLOBAL_INDEX_DIR_NAME);
 
 		IndexWriterConfig iwConfig;
 		StandardAnalyzer analyzer = new StandardAnalyzer(VERSION);
@@ -87,7 +121,7 @@ public class NSDLIndex {
 
 					if (titleLen != 0 && contentLen != 0 && descLen != 0 &&
 						doc.getValues("subject").length > 0 &&
-						doc.getValues("audience").length == 1 && totalDocs < 20000) {
+						doc.getValues("audience").length == 1) {
 					
 						totalDocs++;
 						iw.addDocument(doc);
@@ -135,7 +169,7 @@ public class NSDLIndex {
 		NumericRangeQuery<Integer> nq1 = NumericRangeQuery.newIntRange("num_subject", 1, 100, true, true);
 		NumericRangeQuery<Integer> nq2 = NumericRangeQuery.newIntRange("num_audience", 1, 1, true, true);
 		NumericRangeQuery<Integer> nq3 = NumericRangeQuery.newIntRange("title_len", 1, 10000, true, true);
-		NumericRangeQuery<Integer> nq4 = NumericRangeQuery.newIntRange("content_len", 1, 10000000, true, true);
+		NumericRangeQuery<Integer> nq4 = NumericRangeQuery.newIntRange("content_len", 20, 10000000, true, true);
 		NumericRangeQuery<Integer> nq5 = NumericRangeQuery.newIntRange("desc_len", 1, 100000, true, true);
 
 		BooleanQuery nq = new BooleanQuery();
