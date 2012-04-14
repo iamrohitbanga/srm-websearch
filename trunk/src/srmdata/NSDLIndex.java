@@ -3,7 +3,19 @@ package srmdata;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileReader;
+import java.io.IOException;
+import java.io.Reader;
+import java.util.HashMap;
+import java.util.Map;
 
+import org.apache.lucene.analysis.Analyzer;
+import org.apache.lucene.analysis.KeywordAnalyzer;
+import org.apache.lucene.analysis.KeywordTokenizer;
+import org.apache.lucene.analysis.LengthFilter;
+import org.apache.lucene.analysis.LowerCaseFilter;
+import org.apache.lucene.analysis.PerFieldAnalyzerWrapper;
+import org.apache.lucene.analysis.TokenStream;
+import org.apache.lucene.analysis.Tokenizer;
 import org.apache.lucene.analysis.standard.StandardAnalyzer;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.Field;
@@ -29,6 +41,44 @@ public class NSDLIndex {
 	public static String NSDL_GLOBAL_INDEX_DIR_NAME = "../../global_index/";
 	public static Version VERSION = Version.LUCENE_35;
 
+	public static class LowerCaseAnalyzer extends Analyzer {
+
+		@Override
+		public TokenStream tokenStream(String fieldName, Reader reader) {
+			TokenStream stream = new KeywordTokenizer(reader);
+			stream = new LowerCaseFilter(VERSION, stream);
+			return stream;
+		}
+	}
+
+	public static class MyAnalyzer extends Analyzer {
+
+		@Override
+		public TokenStream tokenStream(String fieldName, Reader reader) {
+
+			StandardAnalyzer analyzer = new StandardAnalyzer(VERSION);
+//			Set<String> stopWords = new HashSet<String>();
+//			stopWords.add("gt");
+//			stopWords.add("lt");
+			LengthFilter lengthFilter = new LengthFilter(true, analyzer.tokenStream(fieldName, reader), 3, 1000);
+			return lengthFilter;
+		}
+
+		@Override
+		public TokenStream reusableTokenStream(String fieldName, Reader reader) throws IOException {
+
+			TokenStream stream = (TokenStream) getPreviousTokenStream();
+			
+			if (stream == null) {
+				stream = tokenStream(fieldName, reader);
+//				setPreviousTokenStream(stream);
+			} else if (stream instanceof Tokenizer) {
+				((Tokenizer)stream).reset(reader);
+			}
+			return stream;
+		}
+	}
+	
 	public static void createSmallIndex() throws Exception {
 
 		File nsdl_global_index_dir = new File(NSDL_GLOBAL_INDEX_DIR_NAME);
@@ -36,8 +86,14 @@ public class NSDLIndex {
 		
 		File nsdl_index_dir = new File(NSDL_INDEX_DIR_NAME);
 
+		Map<String, Analyzer> fieldAnalyzers = new HashMap<String, Analyzer>();
+		fieldAnalyzers.put("audience", new LowerCaseAnalyzer());
+		fieldAnalyzers.put("subject", new LowerCaseAnalyzer());
+		fieldAnalyzers.put("sub", new LowerCaseAnalyzer());
+		fieldAnalyzers.put("title", new MyAnalyzer());
+		PerFieldAnalyzerWrapper analyzer = new PerFieldAnalyzerWrapper(new MyAnalyzer(), fieldAnalyzers);
+
 		IndexWriterConfig iwConfig;
-		StandardAnalyzer analyzer = new StandardAnalyzer(VERSION);
 		iwConfig = new IndexWriterConfig(VERSION, analyzer);
 
 		IndexWriter iw;
@@ -67,7 +123,12 @@ public class NSDLIndex {
 		File nsdl_index_dir = new File(NSDL_GLOBAL_INDEX_DIR_NAME);
 
 		IndexWriterConfig iwConfig;
-		StandardAnalyzer analyzer = new StandardAnalyzer(VERSION);
+		Map<String, Analyzer> fieldAnalyzers = new HashMap<String, Analyzer>();
+		fieldAnalyzers.put("audience", new KeywordAnalyzer());
+		fieldAnalyzers.put("subject", new KeywordAnalyzer());
+		fieldAnalyzers.put("sub", new KeywordAnalyzer());
+		fieldAnalyzers.put("title", new MyAnalyzer());
+		PerFieldAnalyzerWrapper analyzer = new PerFieldAnalyzerWrapper(new MyAnalyzer(), fieldAnalyzers);
 		iwConfig = new IndexWriterConfig(VERSION, analyzer);
 
 		IndexWriter iw;
