@@ -10,6 +10,7 @@ import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
 
+import org.apache.lucene.document.Document;
 import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.Term;
 import org.apache.lucene.index.TermDocs;
@@ -28,7 +29,6 @@ public class StructuredRelevanceModel {
 	Set<Integer> allDocIds;
 	LinkedHashSet<Integer> testDocIds;
 	Set<Integer> trainDocIds;
-
 	
 	public StructuredRelevanceModel() {
 		allDocIds = new LinkedHashSet<Integer>();
@@ -71,6 +71,30 @@ public class StructuredRelevanceModel {
 		System.out.println("Total Number of Documents: " + allDocIds.size());
 		System.out.println("Total Number of Training Documents: " + trainDocIds.size());
 		System.out.println("Total Number of Testing Documents: " + testDocIds.size());
+
+		Map<String, Integer> countAudiences = new HashMap<String, Integer>();
+		for (int docID : trainDocIds) {
+			Document doc = ir.document(docID);
+			String audience = doc.get("audience").toLowerCase();
+			Integer cnt = countAudiences.get(audience);
+			if (cnt == null)
+				cnt = new Integer(0);
+			cnt++;
+			countAudiences.put(audience, cnt);
+		}
+		System.out.println("Audience Counts in Training Set: " + countAudiences);
+
+		countAudiences.clear();
+		for (int docID : testDocIds) {
+			Document doc = ir.document(docID);
+			String audience = doc.get("audience").toLowerCase();
+			Integer cnt = countAudiences.get(audience);
+			if (cnt == null)
+				cnt = new Integer(0);
+			cnt++;
+			countAudiences.put(audience, cnt);
+		}
+		System.out.println("Audience Counts in Testing Set: " + countAudiences);
 
 		searcher.close();
 		ir.close();
