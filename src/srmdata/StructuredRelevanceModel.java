@@ -1,28 +1,22 @@
 package srmdata;
 
 import java.io.File;
+import java.io.IOException;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
-import java.util.Iterator;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-import org.apache.lucene.document.Document;
 import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.Term;
 import org.apache.lucene.index.TermDocs;
 import org.apache.lucene.index.TermEnum;
 import org.apache.lucene.index.TermFreqVector;
-import org.apache.lucene.search.BooleanClause;
-import org.apache.lucene.search.BooleanQuery;
-import org.apache.lucene.search.IndexSearcher;
-import org.apache.lucene.search.NumericRangeQuery;
-import org.apache.lucene.search.ScoreDoc;
-import org.apache.lucene.search.TopDocs;
 import org.apache.lucene.store.FSDirectory;
+import org.apache.lucene.store.RAMDirectory;
 
 public class StructuredRelevanceModel {
 
@@ -36,138 +30,80 @@ public class StructuredRelevanceModel {
 		trainDocIds = new LinkedHashSet<Integer>();
 	}
 
-	void generateTestTrainSets_1() throws Exception {
-
-		File nsdl_index_dir = new File(NSDLIndex.NSDL_INDEX_DIR_NAME);
-		IndexReader ir = IndexReader.open(FSDirectory.open(nsdl_index_dir), true);
-		IndexSearcher searcher = new IndexSearcher(ir);
-
-		NumericRangeQuery<Integer> nq1 = NumericRangeQuery.newIntRange("num_subject", 1, 100, true, true);
-		NumericRangeQuery<Integer> nq2 = NumericRangeQuery.newIntRange("num_audience", 1, 1, true, true);
-		NumericRangeQuery<Integer> nq3 = NumericRangeQuery.newIntRange("title_len", 1, 100000, true, true);
-		NumericRangeQuery<Integer> nq4 = NumericRangeQuery.newIntRange("content_len", 1, 10000000, true, true);
-		NumericRangeQuery<Integer> nq5 = NumericRangeQuery.newIntRange("desc_len", 1, 10000000, true, true);
-
-		BooleanQuery nq = new BooleanQuery();
-		nq.add(nq1, BooleanClause.Occur.MUST);
-		nq.add(nq2, BooleanClause.Occur.MUST);
-		nq.add(nq3, BooleanClause.Occur.MUST);
-		nq.add(nq4, BooleanClause.Occur.MUST);
-		nq.add(nq5, BooleanClause.Occur.MUST);
-
-		TopDocs t = searcher.search(nq, 20000);
-		ScoreDoc[] hits = t.scoreDocs;
-		Collections.shuffle(Arrays.asList(hits));
-		double testTrainRatio = 0.8;
-		int maxTrain = (int) (testTrainRatio * hits.length);
-		for (int i = 0; i < hits.length; ++i) {
-			allDocIds.add(hits[i].doc);
-			if (i < maxTrain)
-				trainDocIds.add(hits[i].doc);
-			else
-				testDocIds.add(hits[i].doc);
-		}
-
-		System.out.println("Total Number of Documents: " + allDocIds.size());
-		System.out.println("Total Number of Training Documents: " + trainDocIds.size());
-		System.out.println("Total Number of Testing Documents: " + testDocIds.size());
-
-		Map<String, Integer> countAudiences = new HashMap<String, Integer>();
-		for (int docID : trainDocIds) {
-			Document doc = ir.document(docID);
-			String audience = doc.get("audience").toLowerCase();
-			Integer cnt = countAudiences.get(audience);
-			if (cnt == null)
-				cnt = new Integer(0);
-			cnt++;
-			countAudiences.put(audience, cnt);
-		}
-		System.out.println("Audience Counts in Training Set: " + countAudiences);
-
-		countAudiences.clear();
-		for (int docID : testDocIds) {
-			Document doc = ir.document(docID);
-			String audience = doc.get("audience").toLowerCase();
-			Integer cnt = countAudiences.get(audience);
-			if (cnt == null)
-				cnt = new Integer(0);
-			cnt++;
-			countAudiences.put(audience, cnt);
-		}
-		System.out.println("Audience Counts in Testing Set: " + countAudiences);
-
-		searcher.close();
-		ir.close();
-	}
 
 	class Score {
-		Double score;
-		Integer docID;
+		double score;
+		int docID;
 	}
 
-	void predictAudience() throws Exception {
+	void predictField(String fieldToPredict, Map<String,String> testTrainFiles) throws Exception {
 
-		File nsdl_index_dir = new File(NSDLIndex.NSDL_INDEX_DIR_NAME);
-		IndexReader ir = IndexReader.open(FSDirectory.open(nsdl_index_dir), true);
+		for (Map.Entry<String, String> filenames : testTrainFiles.entrySet()) {
 
-		int num_fields = 3;
-		double[][] scores = new double[num_fields][]; 
-		long t1 = System.nanoTime();
-			 scores[0] = computePriors(ir, testDocIds, trainDocIds, "title");
-		long t2 = System.nanoTime();
-		System.out.println("                Time Taken: " + ((double)(t2-t1)) / 1E9);
+			RAMDirectory trainRAMDirectory = new RAMDirectory(FSDirectory.open(new File(filenames.getKey()))); 
+			RAMDirectory testRAMDirectory = new RAMDirectory(FSDirectory.open(new File(filenames.getValue()))); 
+			IndexReader trainIR = IndexReader.open(trainRAMDirectory, true);
+			IndexReader testIR  = IndexReader.open(testRAMDirectory, true);
 
-			scores[1] = computePriors(ir, testDocIds, trainDocIds, "desc");
-		long t3 = System.nanoTime();
-		System.out.println("                Time Taken: " + ((double)(t3-t2)) / 1E9);
+			System.out.println("Train File Name: " + filenames.getKey() + " Test File Name: " + filenames.getValue());
+			int num_fields = 3;
 
-			scores[2] = computePriors(ir, testDocIds, trainDocIds, "content");
-		long t4 = System.nanoTime();
-		System.out.println("                Time Taken: " + ((double)(t4-t3)) / 1E9);
+			int nTrainDocs = trainIR.numDocs();
+			int nTestDocs = testIR.numDocs();
 
-		Score[][] combined_score = new Score[testDocIds.size()][trainDocIds.size()];
+			double[][][] scores = new double[num_fields][][];
+			long t1, t2;
+			t1 = System.nanoTime();
+				scores[0] = computePriors(testIR, trainIR, "title");
+			t2 = System.nanoTime();
+			System.out.println("Time Taken Priors (title): " + ((double)(t2-t1)) / 1E9);
+			t1 = System.nanoTime();
+				scores[1] = computePriors(testIR, trainIR, "desc");
+			t2 = System.nanoTime();
+			System.out.println("Time Taken Priors (desc): " + ((double)(t2-t1)) / 1E9);
+			t1 = System.nanoTime();
+//			scores[2] = computePriors(testIR, trainIR, "content");
+//			t2 = System.nanoTime();
+//			System.out.println("Time Taken Priors (content): " + ((double)(t2-t1)) / 1E9);
 
-		for (int i = 0; i < combined_score.length; ++i) {
-			for (int j = 0; j < combined_score[i].length; ++j) {
-				combined_score[i][j] = new Score();
+			Score[][] combined_score = new Score[nTestDocs][nTrainDocs];
+			for (int i = 0; i < nTestDocs; ++i) {
+				for (int j = 0; j < nTrainDocs; ++j) {
+					combined_score[i][j] = new Score();
+				}
 			}
-		}
 
-		for (int i = 0; i < scores[0].length; ++i) {
-
-			int x, y;
-			x = i / testDocIds.size();
-			y = i % testDocIds.size();
-
-			combined_score[y][x].score = scores[0][i] * scores[1][i] * scores[2][i];
-			combined_score[y][x].docID = x; 
-//			System.out.println(" (" + i + "," + combined_score[i] + "," + scores[0][i]
-//					+ "," + scores[1][i] + "," + scores[2][i] + ") ");
-		}
-//		System.out.println();
-
-		for (int i = 0; i < testDocIds.size(); ++i) {
-			Arrays.sort(combined_score[i], new DescendingComp());
-		}
-
-		Iterator<Integer> iter = testDocIds.iterator();
-		for (int i = 0; i < 5; ++i) {
-			System.out.println("for test doc: " + iter.next());
-			for (int j = 0; j < 100; ++j) {
-				System.out.println(" (" + i + "," + combined_score[i][j].docID + "," + combined_score[i][j].score + ") ");
+			for (int i = 0; i < nTrainDocs; ++i) {
+				for (int j = 0; j < nTestDocs; ++j) {
+					combined_score[j][i].docID = j;
+					combined_score[j][i].score = scores[0][i][j] * scores[1][i][j];
+				}
 			}
-			System.out.println();
-			System.out.println();
-		}
 
-		ir.close();
+			t1 = System.nanoTime();
+			DescendingComp comp = new DescendingComp();
+			for (int i = 0; i < nTestDocs; ++i) {
+
+				double total_score = 0.0;
+				for (int j = 0; j < nTrainDocs; ++j)
+					total_score += combined_score[i][j].score;
+
+				for (int j = 0; j < nTrainDocs; ++j)
+					combined_score[i][j].score /= total_score;
+
+				Arrays.sort(combined_score[i], comp);
+			}
+			t2 = System.nanoTime();
+			System.out.println("Time Taken Normalization and Sorting: " + ((double)(t2-t1)) / 1E9);
+
+			trainIR.close();
+			testIR.close();
+		}
 	}
 
-	private static class DescendingComp implements Comparator<Score> {
-
+	class DescendingComp implements Comparator<Score> {
 		@Override
 		public int compare(Score o1, Score o2) {
-		
 			Double diff = o2.score-o1.score;
 			if (diff < 0)
 				return -1;
@@ -184,39 +120,164 @@ public class StructuredRelevanceModel {
 		}
 		return false;
 	}
-	
-	
-	double[] computePriors(IndexReader ir, Set<Integer> testDocs, Set<Integer> modelDocs, String fieldName) throws Exception {
 
-		Map<Integer, Integer> doc_length = new HashMap<Integer, Integer>();
-		for (Integer docID : modelDocs) {
-			TermFreqVector tfVec = ir.getTermFreqVector(docID, fieldName);
-			doc_length.put(docID, tfVec.size());
+	int getNumTermsInDocument(IndexReader ir, int docID, String fieldName) throws IOException {
+		TermFreqVector tfVec = ir.getTermFreqVector(docID, fieldName);
+		return ((tfVec == null) ? 0 : tfVec.size());
+	}
+
+	double[][] computePriors(IndexReader testIR, IndexReader trainIR, String fieldName) throws Exception {
+
+		// assume there are no holes in document ids for train/test indices
+		int nTrainDocs = trainIR.numDocs();
+		int nTestDocs = testIR.numDocs();
+
+		// find number of terms in all training documents for the given field
+		Map<Integer,Integer> doc_length = new HashMap<Integer, Integer>();
+		for (int docID = 0; docID < nTrainDocs; ++docID) {
+			if (trainIR.document(docID) == null)
+				continue;
+			doc_length.put(docID, getNumTermsInDocument(trainIR,docID,fieldName));
 		}
 
-		Map<Integer, Integer> mdToSeqID = new HashMap<Integer, Integer>();
-		Map<Integer, Integer> seqIDToMd = new HashMap<Integer, Integer>();
-		int newMd = 0;
-		for (int md : modelDocs) {
-			mdToSeqID.put(md, newMd);
-			seqIDToMd.put(newMd, md);
-			newMd++;
-		}
-
-		Map<Integer, Integer> qToSeqID = new HashMap<Integer, Integer>();
-		Map<Integer, Integer> seqIDToQ = new HashMap<Integer, Integer>();
-		int newQ = 0;
-		for (int q : testDocs) {
-			qToSeqID.put(q, newQ);
-			seqIDToQ.put(newQ, q);
-			newMd++;
-		}
-
-		double[] modelScores;
-		modelScores = new double[modelDocs.size() * testDocs.size()];
+		double[][] modelScores;
+		modelScores = new double[nTrainDocs][nTestDocs];
 		for (int i = 0; i < modelScores.length; ++i)
-			modelScores[i] = 1.0;
+			for (int j = 0; j < modelScores[i].length; ++j)
+				modelScores[i][j] = 1.0;
 
+		int collectionSize = findCollectionSize(trainIR, fieldName);
+
+		double score[] = new double[2];
+		TermEnum terms = testIR.terms();
+		boolean trainDone = false;
+		while (true) {
+
+			boolean hasNext = terms.next();
+			if (!hasNext) {
+				terms.close();
+				if (trainDone)
+					break;
+				terms = trainIR.terms();
+				trainDone = true;
+				continue;
+			}
+
+			Term t = terms.term();
+			if (!t.field().equals(fieldName) || containsNumber(t.text()))
+				continue;
+
+			double[] mle = compute_mlestimate(trainIR, fieldName, t, doc_length, collectionSize);
+			if (mle == null)
+				continue;
+
+			int[] termDocsArr = new int[nTestDocs];
+			for (int i = 0; i < termDocsArr.length; ++i)
+				termDocsArr[i] = 1;
+			TermDocs termDocs = testIR.termDocs(t);
+			while (termDocs.next()) {
+				termDocsArr[termDocs.doc()] = 0;
+			}
+			termDocs.close();
+
+//			long t1 = System.nanoTime();
+			for (int md = 0; md < nTrainDocs; ++md) {
+				score[0] = mle[md];
+				score[1] = 1.0 - score[0];
+				for (int q = 0; q < nTestDocs; ++q)
+					modelScores[md][q] *= score[termDocsArr[q]];
+			}
+//			long t2 = System.nanoTime();
+//			System.out.println("Time Taken: " + (t2-t1)/1E6);
+		}
+
+		terms.close();
+		return modelScores;
+	}
+
+	private double[] compute_mlestimate(IndexReader ir, String fieldName,
+			Term t, Map<Integer, Integer> doc_length, int collectionSize) throws Exception {
+
+		List<Double> avgs = compute_avgs(ir, fieldName, t);
+		Double pavg = avgs.get(0);
+		Double meanfreq = avgs.get(1);
+		Double collectionFreq = avgs.get(2);
+
+		if (collectionFreq == 0.0) {
+			return null;
+		}
+		
+//		Map<Integer,Double> mlEstimates = new HashMap<Integer, Double>();
+		double[] mlEstimates = new double[ir.maxDoc()];
+
+		double term1 = meanfreq / (1.0 + meanfreq);
+		double term2 = 1.0 / (1.0 + meanfreq);
+		TermDocs termDocs = ir.termDocs(t);
+		while (termDocs.next()) {
+			int d = termDocs.doc();
+			int tf = termDocs.freq();
+			double R = term2 * Math.pow(term1,tf);
+			double pml = ((double)tf) / doc_length.get(d);
+			double val = Math.pow(pml, 1.0-R) * Math.pow(pavg, R);
+			mlEstimates[d] = val;
+		}
+		termDocs.close();
+
+		double defaultVal = ((double)collectionFreq) / collectionSize;
+		for (int md = 0; md < ir.maxDoc(); ++md) {
+			if (mlEstimates[md] != 0.0)
+				mlEstimates[md] = defaultVal;
+		}
+
+		return mlEstimates;
+	}
+
+	private List<Double> compute_avgs(IndexReader ir, String fieldName,
+			Term t) throws Exception {
+
+		double collectionFreq = 0;
+		double pavg = 0.0;
+		double meanfreq = 0.0;
+
+		int count = 0;
+		TermDocs termDocs = ir.termDocs(t);
+		while (termDocs.next()) {
+
+			int d = termDocs.doc();
+			int tf = termDocs.freq();
+			TermFreqVector tfv = ir.getTermFreqVector(d, fieldName);
+			int dl = tfv.size();
+			if (dl == 0)
+			{
+				System.out.println("d:" + d + " dl:" + dl);
+				System.exit(0);
+			}
+			double pml = ((double)tf) / dl;
+			pavg = pavg + pml;
+			meanfreq = meanfreq + tf;
+			collectionFreq = collectionFreq + tf;
+			count++;
+		}
+		termDocs.close();
+
+		if (count == 0) {
+			pavg = 0.0;
+			meanfreq = 0.0;
+		}
+		else {
+			pavg = pavg / count;
+			meanfreq = meanfreq / count;
+		}
+		return Arrays.asList(pavg, meanfreq, collectionFreq);
+	}
+
+	/**
+	 * Find total number of tokens in the collection
+	 * @param ir
+ 	 * @param fieldName
+	 * @throws IOException
+	 */
+	private Integer findCollectionSize(IndexReader ir, String fieldName) throws IOException {
 		int collectionSize = 0;
 		TermEnum terms = ir.terms();
 		while (terms.next()) {
@@ -225,120 +286,11 @@ public class StructuredRelevanceModel {
 				continue;
 			TermDocs termDocs = ir.termDocs(t);
 			while (termDocs.next()) {
-				int d = termDocs.doc();
-				if (!modelDocs.contains(d))
-					continue;
 				collectionSize += termDocs.freq();
 			}
 			termDocs.close();
 		}
 		terms.close();
-
-		System.out.println("Collection Size: " + collectionSize);
-
-		int[] docsForTerm = new int[testDocs.size()];
-		
-		terms = ir.terms();
-		while (terms.next()) {
-
-			Term t = terms.term();
-			if (!t.field().equals(fieldName) || containsNumber(t.text()))
-				continue;
-
-			for (int i = 0; i < docsForTerm.length; ++i)
-				docsForTerm[i] = 1;
-
-			TermDocs termDocs = ir.termDocs(t);
-			while (termDocs.next()) {
-				if (!testDocs.contains(termDocs.doc()))
-					continue;
-				docsForTerm[qToSeqID.get(termDocs.doc())] = 0;
-			}
-			termDocs.close();
-
-			Map<Integer, Double> mle = compute_mlestimate(ir, fieldName, modelDocs, t, doc_length, collectionSize);
-
-			int mdSize = modelDocs.size();
-			int qSize = testDocs.size();
-			double[] val = new double[2];
-			for (int md=0; md < mdSize; ++md) {
-				val[0] = mle.get(seqIDToMd.get(md));
-				val[1] = 1.0 - val[0];
-				for (int q = 0; q < qSize; ++q) {
-					modelScores[md*qSize + q] *= val[docsForTerm[q]];
-				}
-			}
-
-		}
-		terms.close();
-		return modelScores;
+		return collectionSize;
 	}
-
-	private Map<Integer,Double> compute_mlestimate(IndexReader ir, String fieldName,
-			Set<Integer> modelDocIds, Term t, Map<Integer, Integer> doc_length, int collectionSize) throws Exception {
-
-		Double pavg = 0.0;
-		Double meanfreq = 0.0;
-		Integer collectionFreq = 0;
-		compute_avgs(ir, fieldName, modelDocIds, t, pavg, meanfreq, collectionFreq);
-
-		Map<Integer,Double> mlEstimates = new HashMap<Integer, Double>();
-
-		TermDocs termDocs = ir.termDocs(t);
-		while (termDocs.next()) {
-
-			int d = termDocs.doc();
-			if (!modelDocIds.contains(d))
-				continue;
-
-			int tf = termDocs.freq();
-			double R = Math.pow((meanfreq/(1.0+meanfreq)),tf)/(1.0+meanfreq);
-			double pml = ((double)tf) / doc_length.get(d);
-			double val = Math.pow(pml, 1.0-R) * Math.pow(pavg, R);
-			mlEstimates.put(d, val);
-		}
-		termDocs.close();
-
-		double defaultVal = ((double)collectionFreq) / collectionSize;
-		for (Integer md : modelDocIds) {
-			if (!mlEstimates.containsKey(md))
-				mlEstimates.put(md, defaultVal);
-		}
-
-		return mlEstimates;
-	}
-
-	private void compute_avgs(IndexReader ir, String fieldName,
-			Set<Integer> modelDocIds, Term t,
-			Double pavg, Double meanfreq, Integer collectionFreq) throws Exception {
-
-		collectionFreq = 0;
-		pavg = 0.0;
-		meanfreq = 0.0;
-
-		int count = 0;
-		TermDocs termDocs = ir.termDocs(t);
-		while (termDocs.next()) {
-
-			int d = termDocs.doc();
-			if (!modelDocIds.contains(d))
-				continue;
-
-			int tf = termDocs.freq();
-			TermFreqVector tfv = ir.getTermFreqVector(d, fieldName);
-
-			int dl = tfv.size();
-			double pml = ((double)tf) / dl;
-			pavg = pavg + pml;
-			meanfreq = meanfreq + tf;
-
-			collectionFreq = collectionFreq + tf;
-			count++;
-		}
-		termDocs.close();
-
-		pavg = pavg / count;
-		meanfreq = meanfreq / count;
-	}
-
 }

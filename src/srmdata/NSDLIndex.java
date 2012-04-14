@@ -5,11 +5,12 @@ import java.io.File;
 import java.io.FileReader;
 import java.io.IOException;
 import java.io.Reader;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 
 import org.apache.lucene.analysis.Analyzer;
-import org.apache.lucene.analysis.KeywordAnalyzer;
 import org.apache.lucene.analysis.KeywordTokenizer;
 import org.apache.lucene.analysis.LengthFilter;
 import org.apache.lucene.analysis.LowerCaseFilter;
@@ -29,6 +30,7 @@ import org.apache.lucene.search.BooleanClause;
 import org.apache.lucene.search.BooleanQuery;
 import org.apache.lucene.search.IndexSearcher;
 import org.apache.lucene.search.NumericRangeQuery;
+import org.apache.lucene.search.ScoreDoc;
 import org.apache.lucene.search.TopDocs;
 import org.apache.lucene.store.FSDirectory;
 import org.apache.lucene.util.NumericUtils;
@@ -41,56 +43,22 @@ public class NSDLIndex {
 	public static String NSDL_GLOBAL_INDEX_DIR_NAME = "../../global_index/";
 	public static Version VERSION = Version.LUCENE_35;
 
-	public static class LowerCaseAnalyzer extends Analyzer {
-
-		@Override
-		public TokenStream tokenStream(String fieldName, Reader reader) {
-			TokenStream stream = new KeywordTokenizer(reader);
-			stream = new LowerCaseFilter(VERSION, stream);
-			return stream;
-		}
-	}
-
-	public static class MyAnalyzer extends Analyzer {
-
-		@Override
-		public TokenStream tokenStream(String fieldName, Reader reader) {
-
-			StandardAnalyzer analyzer = new StandardAnalyzer(VERSION);
-//			Set<String> stopWords = new HashSet<String>();
-//			stopWords.add("gt");
-//			stopWords.add("lt");
-			LengthFilter lengthFilter = new LengthFilter(true, analyzer.tokenStream(fieldName, reader), 3, 1000);
-			return lengthFilter;
-		}
-
-		@Override
-		public TokenStream reusableTokenStream(String fieldName, Reader reader) throws IOException {
-
-			TokenStream stream = (TokenStream) getPreviousTokenStream();
-			
-			if (stream == null) {
-				stream = tokenStream(fieldName, reader);
-//				setPreviousTokenStream(stream);
-			} else if (stream instanceof Tokenizer) {
-				((Tokenizer)stream).reset(reader);
-			}
-			return stream;
-		}
-	}
+	private static String TEST_INDEX_PREFIX = "../../test_index_";
+	private static String TRAIN_INDEX_PREFIX = "../../train_index_";
 	
-	public static void createSmallIndex() throws Exception {
+	public static Map<String, String> testTrainFileNames;
 
-		File nsdl_global_index_dir = new File(NSDL_GLOBAL_INDEX_DIR_NAME);
-		IndexReader ir = IndexReader.open(FSDirectory.open(nsdl_global_index_dir), true);
-		
-		File nsdl_index_dir = new File(NSDL_INDEX_DIR_NAME);
+	static {
+		testTrainFileNames = new HashMap<String, String>();
+	}
 
+	public static IndexWriter createIndexWriter(String name) throws Exception {
+		File nsdl_index_dir = new File(name);
 		Map<String, Analyzer> fieldAnalyzers = new HashMap<String, Analyzer>();
 		fieldAnalyzers.put("audience", new LowerCaseAnalyzer());
 		fieldAnalyzers.put("subject", new LowerCaseAnalyzer());
 		fieldAnalyzers.put("sub", new LowerCaseAnalyzer());
-		fieldAnalyzers.put("title", new MyAnalyzer());
+		fieldAnalyzers.put("educationLevel", new LowerCaseAnalyzer());
 		PerFieldAnalyzerWrapper analyzer = new PerFieldAnalyzerWrapper(new MyAnalyzer(), fieldAnalyzers);
 
 		IndexWriterConfig iwConfig;
@@ -99,17 +67,30 @@ public class NSDLIndex {
 		IndexWriter iw;
 		iw = new IndexWriter(FSDirectory.open(nsdl_index_dir), iwConfig);
 		iw.deleteAll();
+		return iw;
+	}
+	
+	public static void createSmallIndex() throws Exception {
 
+		File nsdl_global_index_dir = new File(NSDL_GLOBAL_INDEX_DIR_NAME);
+		IndexReader ir = IndexReader.open(FSDirectory.open(nsdl_global_index_dir), true);
+		
+		IndexWriter iw = createIndexWriter(NSDL_INDEX_DIR_NAME);
+
+		int count = 0;
 		int totalDocs = ir.maxDoc();
-		for (int i = 0; i < totalDocs; i++) {
+		for (int i = 0; i < totalDocs && count < 1000; i++) {
 			Document doc = ir.document(i);
 			String audience = doc.get("audience");
 			if (audience.equalsIgnoreCase("learner") || audience.equalsIgnoreCase("educator")) {
-				if (Math.random() < 0.3)
+				if (Math.random() < 0.3) {
 					iw.addDocument(doc);
+					count++;
+				}
 			}
 			else {
 				iw.addDocument(doc);
+				count++;
 			}
 		}
 		
@@ -120,21 +101,7 @@ public class NSDLIndex {
 	
 	public static void createGlobalIndex() throws Exception {
 
-		File nsdl_index_dir = new File(NSDL_GLOBAL_INDEX_DIR_NAME);
-
-		IndexWriterConfig iwConfig;
-		Map<String, Analyzer> fieldAnalyzers = new HashMap<String, Analyzer>();
-		fieldAnalyzers.put("audience", new KeywordAnalyzer());
-		fieldAnalyzers.put("subject", new KeywordAnalyzer());
-		fieldAnalyzers.put("sub", new KeywordAnalyzer());
-		fieldAnalyzers.put("title", new MyAnalyzer());
-		PerFieldAnalyzerWrapper analyzer = new PerFieldAnalyzerWrapper(new MyAnalyzer(), fieldAnalyzers);
-		iwConfig = new IndexWriterConfig(VERSION, analyzer);
-
-		IndexWriter iw;
-		iw = new IndexWriter(FSDirectory.open(nsdl_index_dir), iwConfig);
-		iw.deleteAll();
-
+		IndexWriter iw = createIndexWriter(NSDL_GLOBAL_INDEX_DIR_NAME);
 		BufferedReader reader = new BufferedReader(new FileReader(NSDL_FILE_NAME));
 
 		Document doc = null;
@@ -216,10 +183,108 @@ public class NSDLIndex {
 		}
 
 		System.out.println(iw.numDocs());
-		analyzer.close();
 		iw.commit();
 		iw.close();
 		reader.close();
+	}
+
+	public static void generateTestTrainSets() throws Exception {
+
+		File nsdl_index_dir = new File(NSDL_INDEX_DIR_NAME);
+		IndexReader ir = IndexReader.open(FSDirectory.open(nsdl_index_dir), true);
+		IndexSearcher searcher = new IndexSearcher(ir);
+
+		NumericRangeQuery<Integer> nq1 = NumericRangeQuery.newIntRange("num_subject", 1, 100, true, true);
+		NumericRangeQuery<Integer> nq2 = NumericRangeQuery.newIntRange("num_audience", 1, 1, true, true);
+		NumericRangeQuery<Integer> nq3 = NumericRangeQuery.newIntRange("title_len", 1, 100000, true, true);
+		NumericRangeQuery<Integer> nq4 = NumericRangeQuery.newIntRange("content_len", 1, 10000000, true, true);
+		NumericRangeQuery<Integer> nq5 = NumericRangeQuery.newIntRange("desc_len", 1, 10000000, true, true);
+
+		BooleanQuery nq = new BooleanQuery();
+		nq.add(nq1, BooleanClause.Occur.MUST);
+		nq.add(nq2, BooleanClause.Occur.MUST);
+		nq.add(nq3, BooleanClause.Occur.MUST);
+		nq.add(nq4, BooleanClause.Occur.MUST);
+		nq.add(nq5, BooleanClause.Occur.MUST);
+
+		TopDocs t = searcher.search(nq, 20000);
+		ScoreDoc[] hits = t.scoreDocs;
+		double testTrainRatio = 0.8;
+
+		Collections.shuffle(Arrays.asList(hits));
+
+		Map<String, Integer> countAudiencesTrain = new HashMap<String, Integer>();
+		Map<String, Integer> countAudiencesTest = new HashMap<String, Integer>();
+
+		IndexWriter trainIW = createIndexWriter(TRAIN_INDEX_PREFIX + "1");
+		IndexWriter testIW = createIndexWriter(TEST_INDEX_PREFIX + "1");
+
+		testTrainFileNames.put(TRAIN_INDEX_PREFIX + "1", TEST_INDEX_PREFIX + "1");
+
+		int maxTrain = (int) (testTrainRatio * hits.length);
+		for (int i = 0; i < hits.length; ++i) {
+			Document doc = ir.document(hits[i].doc);
+			String audience = doc.get("audience").toLowerCase();
+
+			if (i < maxTrain) {
+				Integer cnt = countAudiencesTrain.get(audience);
+				if (cnt == null)
+					cnt = new Integer(0);
+				cnt++;
+				countAudiencesTrain.put(audience, cnt);
+				trainIW.addDocument(doc);
+			}
+			else {
+				Integer cnt = countAudiencesTest.get(audience);
+				if (cnt == null)
+					cnt = new Integer(0);
+				cnt++;
+				countAudiencesTest.put(audience, cnt);
+				testIW.addDocument(doc);
+			}
+		}
+
+		System.out.println("Audience Counts in Training Set: " + countAudiencesTrain);
+		System.out.println("Audience Counts in Testing Set: " + countAudiencesTest);
+
+		trainIW.close();
+		testIW.close();
+
+		searcher.close();
+		ir.close();
+	}
+
+	public static class LowerCaseAnalyzer extends Analyzer {
+		@Override
+		public TokenStream tokenStream(String fieldName, Reader reader) {
+			TokenStream stream = new KeywordTokenizer(reader);
+			stream = new LowerCaseFilter(VERSION, stream);
+			return stream;
+		}
+	}
+
+	public static class MyAnalyzer extends Analyzer {
+		@Override
+		public TokenStream tokenStream(String fieldName, Reader reader) {
+			StandardAnalyzer analyzer = new StandardAnalyzer(VERSION);
+//			Set<String> stopWords = new HashSet<String>();
+//			stopWords.add("gt");
+//			stopWords.add("lt");
+			LengthFilter lengthFilter = new LengthFilter(true, analyzer.tokenStream(fieldName, reader), 3, 1000);
+			return lengthFilter;
+		}
+
+		@Override
+		public TokenStream reusableTokenStream(String fieldName, Reader reader) throws IOException {
+			TokenStream stream = (TokenStream) getPreviousTokenStream();
+			if (stream == null) {
+				stream = tokenStream(fieldName, reader);
+//				setPreviousTokenStream(stream);
+			} else if (stream instanceof Tokenizer) {
+				((Tokenizer)stream).reset(reader);
+			}
+			return stream;
+		}
 	}
 
 	public static void computeStatistics() throws Exception {
