@@ -63,23 +63,23 @@ public class MultiLabelClassificationNSDL {
 
 		int num_fields = 3;
 		double[][][] scores = new double[num_fields][][];
-//		StructuredRelevanceModel srm = new StructuredRelevanceModel();
+		StructuredRelevanceModel srm = new StructuredRelevanceModel();
 		t1 = System.nanoTime();
-//		scores[0] = srm.computePriors(testIR, trainIR, "title");
-		PriorCalculator priorCalcTitle = new PriorCalculator(testIR, trainIR, "title");
-		scores[0] = priorCalcTitle.computePriors();
+		scores[0] = srm.computePriors(testIR, trainIR, "title");
+//		PriorCalculator priorCalcTitle = new PriorCalculator(testIR, trainIR, "title");
+//		scores[0] = priorCalcTitle.computePriors();
 		t2 = System.nanoTime();
 		System.out.println("Time Taken Priors (title): " + ((double)(t2-t1)) / 1E9);
 		t1 = System.nanoTime();
-//			scores[1] = srm.computePriors(testIR, trainIR, "desc");
-		PriorCalculator priorCalcDesc = new PriorCalculator(testIR, trainIR, "desc");
-		scores[1] = priorCalcDesc.computePriors();
+			scores[1] = srm.computePriors(testIR, trainIR, "desc");
+//		PriorCalculator priorCalcDesc = new PriorCalculator(testIR, trainIR, "desc");
+//		scores[1] = priorCalcDesc.computePriors();
 		t2 = System.nanoTime();
 		System.out.println("Time Taken Priors (desc): " + ((double)(t2-t1)) / 1E9);
 		t1 = System.nanoTime();
-//			scores[2] = srm.computePriors(testIR, trainIR, "content");
-		PriorCalculator priorCalcContent = new PriorCalculator(testIR, trainIR, "content");
-		scores[2] = priorCalcContent.computePriors();
+			scores[2] = srm.computePriors(testIR, trainIR, "content");
+//		PriorCalculator priorCalcContent = new PriorCalculator(testIR, trainIR, "content");
+//		scores[2] = priorCalcContent.computePriors();
 		t2 = System.nanoTime();
 		System.out.println("Time Taken Priors (content): " + ((double)(t2-t1)) / 1E9);
 
@@ -93,7 +93,7 @@ public class MultiLabelClassificationNSDL {
 		for (int i = 0; i < nTrainDocs; ++i) {
 			for (int j = 0; j < nTestDocs; ++j) {
 				combined_score[j][i].docID = i;
-				combined_score[j][i].score = scores[0][i][j] * scores[1][i][j] * scores[2][i][j];
+				combined_score[j][i].score = scores[0][i][j];// * scores[1][i][j];// * scores[2][i][j];
 			}
 		}
 
@@ -109,6 +109,14 @@ public class MultiLabelClassificationNSDL {
 			for (int j = 0; j < topN; ++j) {
 				total_score += combined_score[i][j].score;
 			}
+			if (total_score == 0.0)
+			{
+				System.out.println("here " + i);
+				for (int j = 0; j < topN; ++j) {
+					System.out.println(combined_score[i][j].score);
+				}
+				System.exit(0);
+			}
 			for (int j = 0; j < topN; ++j)
 				combined_score[i][j].score /= total_score;
 		}
@@ -119,6 +127,7 @@ public class MultiLabelClassificationNSDL {
 		String fieldToPredict = "subject";
 		int numCorrect = 0;
 		for (int i = 0; i < nTestDocs; ++i) {
+			fieldCounts.clear();
 			int total_freq = 0;
 			for (int j = 0; j < topN; ++j) {
 				int docID = combined_score[i][j].docID;
@@ -214,6 +223,7 @@ public class MultiLabelClassificationNSDL {
 		ScoreDoc[] hits = t.scoreDocs;
 		System.out.println("Number of documents eligible for testing set: " + hits.length);
 
+		// select the document ids from the global index to go into the testing index
 		Set<Integer> testDocIDs = new HashSet<Integer>();
 		for (int i = 0; i < numTesting; ++i) {
 			int docID = (int) (Math.random() * hits.length);

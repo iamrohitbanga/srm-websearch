@@ -60,7 +60,6 @@ public class PriorCalculator {
 		TermEnum terms = testIR.terms();
 		boolean trainDone = false;
 		while (true) {
-
 			boolean hasNext = terms.next();
 			if (!hasNext) {
 				terms.close();
@@ -70,7 +69,6 @@ public class PriorCalculator {
 				trainDone = true;
 				continue;
 			}
-
 			Term t = terms.term();
 			if (!t.field().equals(fieldName) || containsNumber(t.text()))
 				continue;
@@ -101,16 +99,9 @@ public class PriorCalculator {
 			}
 		}
 
-		int running = 0;
-		do {
-			running = 0;
-			for (Thread thread : threads) {
-				if (thread.isAlive()) {
-					running++;
-				}
-			}
-//			System.out.println("We have " + running + " running threads. ");
-		} while (running > 0);
+		for (Thread thread : threads) {
+			thread.join();
+		}
 
 		double[][] finalModelScores = new double[nTrainDocs][nTestDocs];
 		for (int i = 0; i < finalModelScores.length; ++i) {
@@ -122,6 +113,10 @@ public class PriorCalculator {
 			for (int i = 0; i < finalModelScores.length; ++i) {
 				for (int j = 0; j < finalModelScores[i].length; ++j) {
 					finalModelScores[i][j] *= modelScores[threadNum][i][j];
+					if (modelScores[threadNum][i][j] == 0.0) {
+						System.out.println("here " + threadNum + " " + i + " " + j);
+						System.exit(0);
+					}
 				}
 			}
 		}
