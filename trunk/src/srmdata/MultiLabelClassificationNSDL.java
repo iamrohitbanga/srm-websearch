@@ -31,9 +31,9 @@ public class MultiLabelClassificationNSDL {
 
 	private static final String TEST_INDEX_NAME = "../../multi_label_test_index";
 	private static final String TRAIN_INDEX_NAME = "../../multi_label_train_index";
-	private static int numTesting = 200;
+	private static int numTesting = 100;
 	private static int numTraining = 1000;
-	
+
 	public static void main(String[] args) throws Exception {
 
 		long t1, t2;
@@ -63,17 +63,23 @@ public class MultiLabelClassificationNSDL {
 
 		int num_fields = 3;
 		double[][][] scores = new double[num_fields][][];
-		StructuredRelevanceModel srm = new StructuredRelevanceModel();
+//		StructuredRelevanceModel srm = new StructuredRelevanceModel();
 		t1 = System.nanoTime();
-		scores[0] = srm.computePriors(testIR, trainIR, "title");
+//		scores[0] = srm.computePriors(testIR, trainIR, "title");
+		PriorCalculator priorCalcTitle = new PriorCalculator(testIR, trainIR, "title");
+		scores[0] = priorCalcTitle.computePriors();
 		t2 = System.nanoTime();
 		System.out.println("Time Taken Priors (title): " + ((double)(t2-t1)) / 1E9);
 		t1 = System.nanoTime();
-			scores[1] = srm.computePriors(testIR, trainIR, "desc");
+//			scores[1] = srm.computePriors(testIR, trainIR, "desc");
+		PriorCalculator priorCalcDesc = new PriorCalculator(testIR, trainIR, "desc");
+		scores[1] = priorCalcDesc.computePriors();
 		t2 = System.nanoTime();
 		System.out.println("Time Taken Priors (desc): " + ((double)(t2-t1)) / 1E9);
 		t1 = System.nanoTime();
-		scores[2] = srm.computePriors(testIR, trainIR, "content");
+//			scores[2] = srm.computePriors(testIR, trainIR, "content");
+		PriorCalculator priorCalcContent = new PriorCalculator(testIR, trainIR, "content");
+		scores[2] = priorCalcContent.computePriors();
 		t2 = System.nanoTime();
 		System.out.println("Time Taken Priors (content): " + ((double)(t2-t1)) / 1E9);
 
@@ -87,7 +93,7 @@ public class MultiLabelClassificationNSDL {
 		for (int i = 0; i < nTrainDocs; ++i) {
 			for (int j = 0; j < nTestDocs; ++j) {
 				combined_score[j][i].docID = i;
-				combined_score[j][i].score = scores[0][i][j] * scores[1][i][j];
+				combined_score[j][i].score = scores[0][i][j] * scores[1][i][j] * scores[2][i][j];
 			}
 		}
 
@@ -100,8 +106,9 @@ public class MultiLabelClassificationNSDL {
 		int topN = 100;
 		for (int i = 0; i < nTestDocs; ++i) {
 			double total_score = 0.0;
-			for (int j = 0; j < topN; ++j)
+			for (int j = 0; j < topN; ++j) {
 				total_score += combined_score[i][j].score;
+			}
 			for (int j = 0; j < topN; ++j)
 				combined_score[i][j].score /= total_score;
 		}
@@ -141,15 +148,15 @@ public class MultiLabelClassificationNSDL {
 
 			Document testDoc = testIR.document(i);
 
-			System.out.print("docID: " + i + " : ");
+			System.out.print("docID:" + i + ":");
 			for (Fieldable fieldable : testDoc.getFieldables(fieldToPredict)) {
-				System.out.print(fieldable.stringValue() + " : ");
+				System.out.print(fieldable.stringValue() + ":");
 			}
-			System.out.print(":");
+			System.out.println(":");
 			
 			for (int j = 0; j < 6; ++j) {
 				Relevance relevance = relevanceModel.get(j);
-				System.out.print(relevance.fieldValue + " (" + relevance.score + ") ; ");
+				System.out.println("    " + relevance.fieldValue + "(" + relevance.score + ");");
 			}
 			System.out.println();
 		}
