@@ -290,7 +290,7 @@ public class StructuredRelevanceModel {
 
 		double defaultVal = ((double)collectionFreq) / collectionSize;
 		for (int md = 0; md < ir.maxDoc(); ++md) {
-			if (mlEstimates[md] != 0.0)
+			if (mlEstimates[md] == 0.0)
 				mlEstimates[md] = defaultVal;
 		}
 
