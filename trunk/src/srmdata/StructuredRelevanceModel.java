@@ -32,7 +32,7 @@ public class StructuredRelevanceModel {
 	}
 
 
-	class Score {
+	static class Score {
 		double score;
 		double relevance;
 		int docID;
@@ -147,14 +147,14 @@ public class StructuredRelevanceModel {
 				System.out.println();
 			}
 
-			System.out.println("Num Correct: " + numCorrect);
+			System.out.println("Num Correct: " + numCorrect + " out of " + nTestDocs);
 			
 			trainIR.close();
 			testIR.close();
 		}
 	}
 
-	class DescendingScoreComp implements Comparator<Score> {
+	static class DescendingScoreComp implements Comparator<Score> {
 		@Override
 		public int compare(Score o1, Score o2) {
 			Double diff = o2.score-o1.score;
@@ -166,7 +166,7 @@ public class StructuredRelevanceModel {
 		}
 	}
 	
-	class DescendingRelevanceComp implements Comparator<Score> {
+	static class DescendingRelevanceComp implements Comparator<Score> {
 		@Override
 		public int compare(Score o1, Score o2) {
 			Double diff = o2.relevance-o1.relevance;

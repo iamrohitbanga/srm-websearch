@@ -79,7 +79,7 @@ public class NSDLIndex {
 
 		int count = 0;
 		int totalDocs = ir.maxDoc();
-		for (int i = 0; i < totalDocs && count < 2000; i++) {
+		for (int i = 0; i < totalDocs; i++) {
 			Document doc = ir.document(i);
 			String audience = doc.get("audience");
 			if (audience.equalsIgnoreCase("learner") || audience.equalsIgnoreCase("educator")) {
@@ -147,13 +147,13 @@ public class NSDLIndex {
 							NumericUtils.PRECISION_STEP_DEFAULT,
 							Store.YES, true).setIntValue(doc.getValues("sub").length));
 
-					if (titleLen != 0 && contentLen != 0 && descLen != 0 &&
-						doc.getValues("subject").length > 0 &&
-						doc.getValues("audience").length == 1) {
+//					if (titleLen != 0 && contentLen != 0 && descLen != 0 &&
+//						doc.getValues("subject").length > 0 &&
+//						doc.getValues("audience").length > 0) {
 					
 						totalDocs++;
 						iw.addDocument(doc);
-					}
+//					}
 
 					titleLen = 0;
 					contentLen = 0;
@@ -195,7 +195,7 @@ public class NSDLIndex {
 		IndexSearcher searcher = new IndexSearcher(ir);
 
 		NumericRangeQuery<Integer> nq1 = NumericRangeQuery.newIntRange("num_subject", 1, 100, true, true);
-		NumericRangeQuery<Integer> nq2 = NumericRangeQuery.newIntRange("num_audience", 1, 1, true, true);
+		NumericRangeQuery<Integer> nq2 = NumericRangeQuery.newIntRange("num_audience", 1, 8, true, true);
 		NumericRangeQuery<Integer> nq3 = NumericRangeQuery.newIntRange("title_len", 1, 100000, true, true);
 		NumericRangeQuery<Integer> nq4 = NumericRangeQuery.newIntRange("content_len", 1, 10000000, true, true);
 		NumericRangeQuery<Integer> nq5 = NumericRangeQuery.newIntRange("desc_len", 1, 10000000, true, true);
@@ -221,8 +221,9 @@ public class NSDLIndex {
 
 		testTrainFileNames.put(TRAIN_INDEX_PREFIX + "1", TEST_INDEX_PREFIX + "1");
 
-		int maxTrain = (int) (testTrainRatio * hits.length);
-		for (int i = 0; i < hits.length; ++i) {
+		int max = 4000;
+		int maxTrain = (int) (testTrainRatio * max);
+		for (int i = 0; i < max; ++i) {
 			Document doc = ir.document(hits[i].doc);
 			String audience = doc.get("audience").toLowerCase();
 
