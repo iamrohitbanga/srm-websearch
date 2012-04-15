@@ -272,7 +272,6 @@ public class StructuredRelevanceModel {
 			return null;
 		}
 		
-//		Map<Integer,Double> mlEstimates = new HashMap<Integer, Double>();
 		double[] mlEstimates = new double[ir.maxDoc()];
 
 		double term1 = meanfreq / (1.0 + meanfreq);
