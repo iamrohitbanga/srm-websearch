@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import org.apache.lucene.document.Document;
 import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.Term;
 import org.apache.lucene.index.TermDocs;
@@ -33,6 +34,7 @@ public class StructuredRelevanceModel {
 
 	class Score {
 		double score;
+		double relevance;
 		int docID;
 	}
 
@@ -62,9 +64,9 @@ public class StructuredRelevanceModel {
 			t2 = System.nanoTime();
 			System.out.println("Time Taken Priors (desc): " + ((double)(t2-t1)) / 1E9);
 			t1 = System.nanoTime();
-//			scores[2] = computePriors(testIR, trainIR, "content");
-//			t2 = System.nanoTime();
-//			System.out.println("Time Taken Priors (content): " + ((double)(t2-t1)) / 1E9);
+			scores[2] = computePriors(testIR, trainIR, "content");
+			t2 = System.nanoTime();
+			System.out.println("Time Taken Priors (content): " + ((double)(t2-t1)) / 1E9);
 
 			Score[][] combined_score = new Score[nTestDocs][nTrainDocs];
 			for (int i = 0; i < nTestDocs; ++i) {
@@ -75,33 +77,84 @@ public class StructuredRelevanceModel {
 
 			for (int i = 0; i < nTrainDocs; ++i) {
 				for (int j = 0; j < nTestDocs; ++j) {
-					combined_score[j][i].docID = j;
+					combined_score[j][i].docID = i;
 					combined_score[j][i].score = scores[0][i][j] * scores[1][i][j];
 				}
 			}
 
 			t1 = System.nanoTime();
-			DescendingComp comp = new DescendingComp();
+			DescendingScoreComp comp = new DescendingScoreComp();
 			for (int i = 0; i < nTestDocs; ++i) {
-
-				double total_score = 0.0;
-				for (int j = 0; j < nTrainDocs; ++j)
-					total_score += combined_score[i][j].score;
-
-				for (int j = 0; j < nTrainDocs; ++j)
-					combined_score[i][j].score /= total_score;
-
 				Arrays.sort(combined_score[i], comp);
+			}
+
+			int topN = 100;
+			for (int i = 0; i < nTestDocs; ++i) {
+				double total_score = 0.0;
+				for (int j = 0; j < topN; ++j)
+					total_score += combined_score[i][j].score;
+				for (int j = 0; j < topN; ++j)
+					combined_score[i][j].score /= total_score;
 			}
 			t2 = System.nanoTime();
 			System.out.println("Time Taken Normalization and Sorting: " + ((double)(t2-t1)) / 1E9);
 
+			int numAudience = 6;
+			Map<String,Integer> audienceMap = new HashMap<String,Integer>();
+			audienceMap.put("learner", 0);
+			audienceMap.put("educator", 1);
+			audienceMap.put("researcher", 2);
+			audienceMap.put("general public", 3);
+			audienceMap.put("professional/practitioner", 4);
+			audienceMap.put("administrator", 5);
+
+			int numCorrect = 0;
+			for (int i = 0; i < nTestDocs; ++i) {
+				double[] audience_freq = new double[numAudience];
+				int total_freq = 0;
+				for (int j = 0; j < topN; ++j) {
+					int docID = combined_score[i][j].docID;
+					combined_score[i][j].relevance = 0.0;
+					Document doc = trainIR.document(docID);
+					String fieldValue = doc.get(fieldToPredict).toLowerCase();
+					Integer index = audienceMap.get(fieldValue);
+					audience_freq[index]++;
+					total_freq++;
+				}
+
+				for (int j = 0; j < topN; ++j) {
+					int docID = combined_score[i][j].docID;
+					Document doc = trainIR.document(docID);
+					String fieldValue = doc.get(fieldToPredict).toLowerCase();
+					Integer index = audienceMap.get(fieldValue);
+					combined_score[i][j].relevance = (audience_freq[index] / total_freq) * combined_score[i][j].score;
+				}
+				Arrays.sort(combined_score[i], 0, topN-1, new DescendingRelevanceComp());
+
+				Document testDoc = testIR.document(i);
+				String actualValue = testDoc.get(fieldToPredict);
+
+				System.out.print(actualValue + " : ");
+				for (int j = 0; j < 10; ++j) {
+					int docID = combined_score[i][j].docID;
+					combined_score[i][j].relevance = 0.0;
+					Document doc = trainIR.document(docID);
+					String fieldValue = doc.get(fieldToPredict);
+					if (j == 0 && actualValue.equals(fieldValue))
+						numCorrect++;
+					System.out.print(fieldValue + " ");
+				}
+				System.out.println();
+			}
+
+			System.out.println("Num Correct: " + numCorrect);
+			
 			trainIR.close();
 			testIR.close();
 		}
 	}
 
-	class DescendingComp implements Comparator<Score> {
+	class DescendingScoreComp implements Comparator<Score> {
 		@Override
 		public int compare(Score o1, Score o2) {
 			Double diff = o2.score-o1.score;
@@ -113,6 +166,18 @@ public class StructuredRelevanceModel {
 		}
 	}
 	
+	class DescendingRelevanceComp implements Comparator<Score> {
+		@Override
+		public int compare(Score o1, Score o2) {
+			Double diff = o2.relevance-o1.relevance;
+			if (diff < 0)
+				return -1;
+			if (diff > 0)
+				return 1;
+			return 0;
+		}
+	}
+
 	boolean containsNumber(String str) {
 		for (int i = 0; i < str.length(); ++i) {
 			if (str.charAt(i) >= '0' && str.charAt(i) <= '9')
