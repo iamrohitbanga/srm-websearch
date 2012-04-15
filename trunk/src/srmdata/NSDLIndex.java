@@ -79,7 +79,7 @@ public class NSDLIndex {
 
 		int count = 0;
 		int totalDocs = ir.maxDoc();
-		for (int i = 0; i < totalDocs && count < 1000; i++) {
+		for (int i = 0; i < totalDocs && count < 2000; i++) {
 			Document doc = ir.document(i);
 			String audience = doc.get("audience");
 			if (audience.equalsIgnoreCase("learner") || audience.equalsIgnoreCase("educator")) {
