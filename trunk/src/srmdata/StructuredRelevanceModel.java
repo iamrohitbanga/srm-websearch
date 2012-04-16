@@ -15,7 +15,6 @@ import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.Term;
 import org.apache.lucene.index.TermDocs;
 import org.apache.lucene.index.TermEnum;
-import org.apache.lucene.index.TermFreqVector;
 import org.apache.lucene.store.FSDirectory;
 import org.apache.lucene.store.RAMDirectory;
 
@@ -30,7 +29,6 @@ public class StructuredRelevanceModel {
 		testDocIds = new LinkedHashSet<Integer>();
 		trainDocIds = new LinkedHashSet<Integer>();
 	}
-
 
 	static class Score {
 		double score;
@@ -186,18 +184,6 @@ public class StructuredRelevanceModel {
 		return false;
 	}
 
-	static int getNumTermsInDocument(IndexReader ir, int docID, String fieldName) throws IOException {
-		TermFreqVector tfVec = ir.getTermFreqVector(docID, fieldName);
-		if (tfVec == null)
-			return 0;
-//		return tfVec.size();
-		int nTerms = 0;
-		int[] termFrequencies = tfVec.getTermFrequencies();
-		for (int i = 0; i < termFrequencies.length; ++i)
-			nTerms += termFrequencies[i];
-		return nTerms;
-	}
-
 	double[][] computePriors(IndexReader testIR, IndexReader trainIR, String fieldName) throws Exception {
 
 		// assume there are no holes in document ids for train/test indices
@@ -206,9 +192,6 @@ public class StructuredRelevanceModel {
 
 		// find number of terms in all training documents for the given field
 		int[] doc_lengths = new int[nTrainDocs];
-		for (int docID = 0; docID < nTrainDocs; ++docID) {
-			doc_lengths[docID] = getNumTermsInDocument(trainIR,docID,fieldName);
-		}
 
 		double[][] modelScores;
 		modelScores = new double[nTrainDocs][nTestDocs];
@@ -216,7 +199,7 @@ public class StructuredRelevanceModel {
 			for (int j = 0; j < modelScores[i].length; ++j)
 				modelScores[i][j] = 1.0;
 
-		int collectionSize = findCollectionSize(trainIR, fieldName);
+		int collectionSize = findCollectionSize(trainIR, fieldName, doc_lengths);
 
 		double[] mle = new double[trainIR.numDocs()];
 		double score[] = new double[2];
@@ -279,16 +262,16 @@ public class StructuredRelevanceModel {
 			return null;
 		}
 
+		for (int i = 0; i < mlEstimates.length; ++i) {
+			mlEstimates[i] = 0.0;
+		}
+
 		double term1 = meanfreq / (1.0 + meanfreq);
 		double term2 = 1.0 / (1.0 + meanfreq);
 		TermDocs termDocs = ir.termDocs(t);
 		while (termDocs.next()) {
 			int d = termDocs.doc();
 			int tf = termDocs.freq();
-			if (tf == 0) {
-				System.out.println("tf is zero." + " document: " + d + " term: " + t.text());
-				System.exit(0);
-			}
 			double R = term2 * Math.pow(term1,tf);
 			double pml = ((double)tf) / doc_length[d];
 			double val = Math.pow(pml, 1.0-R) * Math.pow(pavg, R);
@@ -340,9 +323,10 @@ public class StructuredRelevanceModel {
 	 * Find total number of tokens in the collection
 	 * @param ir
  	 * @param fieldName
+	 * @param doc_lengths 
 	 * @throws IOException
 	 */
-	static Integer findCollectionSize(IndexReader ir, String fieldName) throws IOException {
+	static Integer findCollectionSize(IndexReader ir, String fieldName, int[] doc_lengths) throws IOException {
 		int collectionSize = 0;
 		TermEnum terms = ir.terms();
 		while (terms.next()) {
@@ -351,7 +335,10 @@ public class StructuredRelevanceModel {
 				continue;
 			TermDocs termDocs = ir.termDocs(t);
 			while (termDocs.next()) {
-				collectionSize += termDocs.freq();
+				int tf = termDocs.freq();
+				collectionSize += tf;
+				int docID = termDocs.doc();
+				doc_lengths[docID] += tf;
 			}
 			termDocs.close();
 		}

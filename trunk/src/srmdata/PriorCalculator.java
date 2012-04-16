@@ -19,7 +19,7 @@ public class PriorCalculator {
 	IndexReader testIR;
 	String fieldName;
 	List<Term> allTerms;
-	int[] doc_length;
+	int[] doc_lengths;
 	double[][][] modelScores;
 
 	public PriorCalculator(IndexReader testIR, IndexReader trainIR, String fieldName) {
@@ -35,12 +35,7 @@ public class PriorCalculator {
 		nTestDocs = testIR.numDocs();
 
 		// find number of terms in all training documents for the given field
-		doc_length = new int[nTrainDocs];
-		for (int docID = 0; docID < nTrainDocs; ++docID) {
-			if (trainIR.document(docID) == null)
-				continue;
-			doc_length[docID] = StructuredRelevanceModel.getNumTermsInDocument(trainIR,docID,fieldName);
-		}
+		doc_lengths = new int[nTrainDocs];
 
 		modelScores = new double[numThreads][nTrainDocs][nTestDocs];
 		for (int threadNum = 0; threadNum < numThreads; ++threadNum) {
@@ -49,7 +44,7 @@ public class PriorCalculator {
 					modelScores[threadNum][i][j] = 1.0;
 		}
 
-		collectionSize = StructuredRelevanceModel.findCollectionSize(trainIR, fieldName);
+		collectionSize = StructuredRelevanceModel.findCollectionSize(trainIR, fieldName, doc_lengths);
 		allTerms = new ArrayList<Term>();
 
 		TermEnum terms = trainIR.terms();
@@ -141,7 +136,7 @@ public class PriorCalculator {
 				double[] mle = new double[nTrainDocs];
 				for (int index = fromIndex; index <= toIndex; ++index) {
 					Term t = allTerms.get(index);
-					StructuredRelevanceModel.compute_mlestimate(trainIR, fieldName, t, doc_length, collectionSize, mle);
+					StructuredRelevanceModel.compute_mlestimate(trainIR, fieldName, t, doc_lengths, collectionSize, mle);
 					if (mle == null)
 						continue;
 	
