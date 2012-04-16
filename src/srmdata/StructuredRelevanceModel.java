@@ -178,7 +178,7 @@ public class StructuredRelevanceModel {
 		}
 	}
 
-	boolean containsNumber(String str) {
+	static boolean containsNumber(String str) {
 		for (int i = 0; i < str.length(); ++i) {
 			if (str.charAt(i) >= '0' && str.charAt(i) <= '9')
 				return true;
@@ -186,9 +186,16 @@ public class StructuredRelevanceModel {
 		return false;
 	}
 
-	int getNumTermsInDocument(IndexReader ir, int docID, String fieldName) throws IOException {
+	static int getNumTermsInDocument(IndexReader ir, int docID, String fieldName) throws IOException {
 		TermFreqVector tfVec = ir.getTermFreqVector(docID, fieldName);
-		return ((tfVec == null) ? 0 : tfVec.size());
+		if (tfVec == null)
+			return 0;
+//		return tfVec.size();
+		int nTerms = 0;
+		int[] termFrequencies = tfVec.getTermFrequencies();
+		for (int i = 0; i < termFrequencies.length; ++i)
+			nTerms += termFrequencies[i];
+		return nTerms;
 	}
 
 	double[][] computePriors(IndexReader testIR, IndexReader trainIR, String fieldName) throws Exception {
@@ -198,11 +205,9 @@ public class StructuredRelevanceModel {
 		int nTestDocs = testIR.numDocs();
 
 		// find number of terms in all training documents for the given field
-		Map<Integer,Integer> doc_length = new HashMap<Integer, Integer>();
+		int[] doc_lengths = new int[nTrainDocs];
 		for (int docID = 0; docID < nTrainDocs; ++docID) {
-			if (trainIR.document(docID) == null)
-				continue;
-			doc_length.put(docID, getNumTermsInDocument(trainIR,docID,fieldName));
+			doc_lengths[docID] = getNumTermsInDocument(trainIR,docID,fieldName);
 		}
 
 		double[][] modelScores;
@@ -213,26 +218,27 @@ public class StructuredRelevanceModel {
 
 		int collectionSize = findCollectionSize(trainIR, fieldName);
 
+		double[] mle = new double[trainIR.numDocs()];
 		double score[] = new double[2];
-		TermEnum terms = testIR.terms();
-		boolean trainDone = false;
+		TermEnum terms = trainIR.terms();
+//		boolean trainDone = false;
 		while (true) {
 
 			boolean hasNext = terms.next();
 			if (!hasNext) {
 				terms.close();
-				if (trainDone)
+//				if (trainDone)
 					break;
-				terms = trainIR.terms();
-				trainDone = true;
-				continue;
+//				terms = trainIR.terms();
+//				trainDone = true;
+//				continue;
 			}
 
 			Term t = terms.term();
 			if (!t.field().equals(fieldName) || containsNumber(t.text()))
 				continue;
 
-			double[] mle = compute_mlestimate(trainIR, fieldName, t, doc_length, collectionSize);
+			compute_mlestimate(trainIR, fieldName, t, doc_lengths, collectionSize, mle);
 			if (mle == null)
 				continue;
 
@@ -249,8 +255,9 @@ public class StructuredRelevanceModel {
 			for (int md = 0; md < nTrainDocs; ++md) {
 				score[0] = mle[md];
 				score[1] = 1.0 - score[0];
-				for (int q = 0; q < nTestDocs; ++q)
+				for (int q = 0; q < nTestDocs; ++q) {
 					modelScores[md][q] *= score[termDocsArr[q]];
+				}
 			}
 //			long t2 = System.nanoTime();
 //			System.out.println("Time Taken: " + (t2-t1)/1E6);
@@ -260,10 +267,10 @@ public class StructuredRelevanceModel {
 		return modelScores;
 	}
 
-	private double[] compute_mlestimate(IndexReader ir, String fieldName,
-			Term t, Map<Integer, Integer> doc_length, int collectionSize) throws Exception {
+	static double[] compute_mlestimate(IndexReader ir, String fieldName,
+			Term t, int[] doc_length, int collectionSize, double[] mlEstimates) throws Exception {
 
-		List<Double> avgs = compute_avgs(ir, fieldName, t);
+		List<Double> avgs = compute_avgs(ir, fieldName, t, doc_length);
 		Double pavg = avgs.get(0);
 		Double meanfreq = avgs.get(1);
 		Double collectionFreq = avgs.get(2);
@@ -271,8 +278,6 @@ public class StructuredRelevanceModel {
 		if (collectionFreq == 0.0) {
 			return null;
 		}
-		
-		double[] mlEstimates = new double[ir.maxDoc()];
 
 		double term1 = meanfreq / (1.0 + meanfreq);
 		double term2 = 1.0 / (1.0 + meanfreq);
@@ -280,8 +285,12 @@ public class StructuredRelevanceModel {
 		while (termDocs.next()) {
 			int d = termDocs.doc();
 			int tf = termDocs.freq();
+			if (tf == 0) {
+				System.out.println("tf is zero." + " document: " + d + " term: " + t.text());
+				System.exit(0);
+			}
 			double R = term2 * Math.pow(term1,tf);
-			double pml = ((double)tf) / doc_length.get(d);
+			double pml = ((double)tf) / doc_length[d];
 			double val = Math.pow(pml, 1.0-R) * Math.pow(pavg, R);
 			mlEstimates[d] = val;
 		}
@@ -296,8 +305,8 @@ public class StructuredRelevanceModel {
 		return mlEstimates;
 	}
 
-	private List<Double> compute_avgs(IndexReader ir, String fieldName,
-			Term t) throws Exception {
+	static List<Double> compute_avgs(IndexReader ir, String fieldName,
+			Term t, int[] doc_length) throws Exception {
 
 		double collectionFreq = 0;
 		double pavg = 0.0;
@@ -306,17 +315,9 @@ public class StructuredRelevanceModel {
 		int count = 0;
 		TermDocs termDocs = ir.termDocs(t);
 		while (termDocs.next()) {
-
 			int d = termDocs.doc();
 			int tf = termDocs.freq();
-			TermFreqVector tfv = ir.getTermFreqVector(d, fieldName);
-			int dl = tfv.size();
-			if (dl == 0)
-			{
-				System.out.println("d:" + d + " dl:" + dl);
-				System.exit(0);
-			}
-			double pml = ((double)tf) / dl;
+			double pml = ((double)tf) / doc_length[d];
 			pavg = pavg + pml;
 			meanfreq = meanfreq + tf;
 			collectionFreq = collectionFreq + tf;
@@ -341,7 +342,7 @@ public class StructuredRelevanceModel {
  	 * @param fieldName
 	 * @throws IOException
 	 */
-	private Integer findCollectionSize(IndexReader ir, String fieldName) throws IOException {
+	static Integer findCollectionSize(IndexReader ir, String fieldName) throws IOException {
 		int collectionSize = 0;
 		TermEnum terms = ir.terms();
 		while (terms.next()) {
