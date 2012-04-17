@@ -1,12 +1,17 @@
 package srmdata;
 
+import java.io.BufferedWriter;
 import java.io.File;
+import java.io.FileWriter;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -31,9 +36,78 @@ public class MultiLabelClassificationNSDL {
 
 	private static final String TEST_INDEX_NAME = "../../multi_label_test_index";
 	private static final String TRAIN_INDEX_NAME = "../../multi_label_train_index";
-	private static int numTesting = 200;
-	private static int numTraining = 80000;
+	private static final String OUTPUT_FILE_NAME = "../../outputs/output";
+	private static int numTesting = 100;
+	private static int numTraining = 20000;
 
+	private static Set<Integer> testDocIDs;
+	private static Set<Integer> trainDocIDs;
+
+	private static Map<String,Double> time_taken;
+	private static List<PredictionResult> results;
+	private static final int MAX_RESULTS = 10;
+	
+	static class PredictionResult {
+		int docID;
+		Set<String> actualValues;
+		LinkedHashSet<String> predictedValues;
+
+		Set<String> actualTokens;
+		List<List<String>> predictedTokens;
+		
+		PredictionResult() {
+			actualValues = new HashSet<String>();
+			predictedValues = new LinkedHashSet<String>();
+			actualTokens = new LinkedHashSet<String>();
+			predictedTokens = new ArrayList<List<String>>();
+		}
+
+		List<String> tokenize(String strValue) {
+			List<String> tokens = new ArrayList<String>();
+			String[] strs = strValue.split("[^a-zA-Z]");
+			for (int i = 0; i < strs.length; ++i) {
+				if (strs[i].length() > 2)
+					tokens.add(strs[i]);
+			}
+			return tokens;
+		}
+		
+		void addActualValue(String actualValue) {
+			actualValue = actualValue.toLowerCase();
+			actualValues.add(actualValue);
+			actualTokens.addAll(tokenize(actualValue));
+		}
+		
+		void addPredictedValue(String predictedValue) {
+			predictedValue = predictedValue.toLowerCase();
+			predictedValues.add(predictedValue);
+			predictedTokens.add(tokenize(predictedValue));
+		}
+
+		public LinkedHashSet<String> getPredictedValues() {
+			return predictedValues;
+		}
+
+		public Set<String> getActualValues() {
+			return actualValues;
+		}
+
+		public List<List<String>> getPredictedTokenList() {
+			return predictedTokens;
+		}
+		
+		public boolean isRelevant(String token) {
+			return actualTokens.contains(token);
+		}
+	}
+	
+	static {
+		testDocIDs = new HashSet<Integer>();
+		trainDocIDs = new HashSet<Integer>();
+		time_taken = new LinkedHashMap<String,Double>();
+		results = new ArrayList<PredictionResult>();
+	}
+	
 	public static void main(String[] args) throws Exception {
 
 		long t1, t2;
@@ -47,6 +121,73 @@ public class MultiLabelClassificationNSDL {
 			predictfield("subject");
 		t2 = System.nanoTime();
 		System.out.println("Time Taken for Subject Prediction: " + (t2-t1)/1E9);
+
+		BufferedWriter writer = new BufferedWriter(new FileWriter(OUTPUT_FILE_NAME + numTesting + "_" + numTraining));
+		dumpOutput(writer);
+		writer.flush();
+		writer.close();
+	}
+
+	private static void dumpOutput(BufferedWriter writer) throws IOException {
+
+		writer.append("num_testing:" + numTesting + "\n");
+		for (int docID : testDocIDs)
+			writer.append(docID + ";");
+		writer.append("\n");
+
+		writer.append("num_training:" + numTraining + "\n");
+		for (int docID : trainDocIDs)
+			writer.append(docID + ";");
+		writer.append("\n");
+
+		writer.append("num_threads:" + PriorCalculator.numThreads + "\n");
+		
+		for (Map.Entry<String, Double> ttaken : time_taken.entrySet())
+			writer.append("time_taken: " + ttaken.getKey() + " : " + ttaken.getValue() + "\n");
+
+		double[] precisionAtK = new double[MAX_RESULTS];
+
+		writer.append("prediction_results: " + numTesting + "\n");
+		for (PredictionResult result : results) {
+
+			writer.append("\n");
+			writer.append("docID: " + result.docID + "\n");
+
+			writer.append("actualValues: " + result.getActualValues().size() + "\n");
+			for (String actualValue : result.getActualValues())
+				writer.append(actualValue + "\n");
+
+			writer.append("predictedValues: " + result.getPredictedValues().size() + "\n");
+			for (String predictedValue : result.getPredictedValues())
+				writer.append(predictedValue + "\n");
+
+			List<List<String>> predictedTokenList = result.getPredictedTokenList();
+			for (int rank = 1; rank <= predictedTokenList.size(); ++rank) {
+				List<String> tokens = predictedTokenList.get(rank-1);
+				int relevance = 0;
+				for (String token : tokens) {
+					if (result.isRelevant(token)) {
+						relevance++;
+					}
+				}
+				writer.append("\n");
+				precisionAtK[rank-1] += ((double)relevance) / rank;
+				for (int i = 0; i < precisionAtK.length; ++i) {
+					writer.append(precisionAtK[i] + " ");
+				}
+				writer.append("\n");
+			}
+		}
+
+		System.out.println("Precison@K: ");
+		writer.append("Precison@K: ");
+		for (int i = 0; i < precisionAtK.length; ++i) {
+			precisionAtK[i] = precisionAtK[i] / results.size();
+			System.out.print(precisionAtK[i] + " ");
+			writer.append(precisionAtK[i] + " ");
+		}
+		System.out.println();
+		writer.append("\n");
 	}
 
 	private static void predictfield(String fieldToPredict) throws Exception {
@@ -60,6 +201,7 @@ public class MultiLabelClassificationNSDL {
 		int nTestDocs = testIR.numDocs();
 
 		long t1, t2;
+		double ttaken;
 
 		int num_fields = 3;
 		double[][][] scores = new double[num_fields][][];
@@ -70,21 +212,29 @@ public class MultiLabelClassificationNSDL {
 		scores[0] = priorCalcTitle.computePriors();
 		priorCalcTitle = null;
 		t2 = System.nanoTime();
-		System.out.println("Time Taken Priors (title): " + ((double)(t2-t1)) / 1E9);
+		ttaken = ((double)(t2-t1)) / 1E9;
+		System.out.println("Time Taken Priors (title): " + ttaken);
+		time_taken.put("title_model", ttaken);
+		
 		t1 = System.nanoTime();
 //			scores[1] = srm.computePriors(testIR, trainIR, "desc");
 		PriorCalculator priorCalcDesc = new PriorCalculator(testIR, trainIR, "desc");
 		scores[1] = priorCalcDesc.computePriors();
 		priorCalcDesc = null;
 		t2 = System.nanoTime();
-		System.out.println("Time Taken Priors (desc): " + ((double)(t2-t1)) / 1E9);
+		ttaken = ((double)(t2-t1)) / 1E9;
+		System.out.println("Time Taken Priors (desc): " + ttaken);
+		time_taken.put("desc_model", ttaken);
+
 		t1 = System.nanoTime();
 //			scores[2] = srm.computePriors(testIR, trainIR, "content");
 		PriorCalculator priorCalcContent = new PriorCalculator(testIR, trainIR, "content");
 		scores[2] = priorCalcContent.computePriors();
 		priorCalcContent = null;
 		t2 = System.nanoTime();
-		System.out.println("Time Taken Priors (content): " + ((double)(t2-t1)) / 1E9);
+		ttaken = ((double)(t2-t1)) / 1E9;
+		System.out.println("Time Taken Priors (content): " + ttaken);
+		time_taken.put("content_model", ttaken);
 
 		Score[][] combined_score = new Score[nTestDocs][nTrainDocs];
 		for (int i = 0; i < nTestDocs; ++i) {
@@ -158,17 +308,24 @@ public class MultiLabelClassificationNSDL {
 
 			Document testDoc = testIR.document(i);
 
+			PredictionResult result = new PredictionResult();
 			System.out.print("docID:" + i + ":");
 			for (Fieldable fieldable : testDoc.getFieldables(fieldToPredict)) {
-				System.out.print(fieldable.stringValue() + ":");
+				String actualValue = fieldable.stringValue();
+				System.out.print(actualValue + ":");
+				result.addActualValue(actualValue);
 			}
 			System.out.println(":");
 			
-			int max = (relevanceModel.size() < 6) ? relevanceModel.size() : 6;
+			int max = (relevanceModel.size() < 10) ? relevanceModel.size() : 10;
 			for (int j = 0; j < max; ++j) {
 				Relevance relevance = relevanceModel.get(j);
-				System.out.println("    " + relevance.fieldValue + "(" + relevance.score + ");");
+				String predictedValue = relevance.fieldValue;
+				System.out.println("    " + predictedValue + "(" + relevance.score + ");");
+				result.addPredictedValue(predictedValue);
 			}
+
+			results.add(result);
 			System.out.println();
 		}
 
@@ -227,7 +384,6 @@ public class MultiLabelClassificationNSDL {
 		System.out.println("Number of documents eligible for testing set: " + hits.length);
 
 		// select the document ids from the global index to go into the testing index
-		Set<Integer> testDocIDs = new HashSet<Integer>();
 		for (int i = 0; i < numTesting; ++i) {
 			int docID = (int) (Math.random() * hits.length);
 			testDocIDs.add(hits[docID].doc);
@@ -242,8 +398,10 @@ public class MultiLabelClassificationNSDL {
 				testIW.addDocument(doc);
 			}
 			else {
-				if (trainIW.numDocs() < numTraining)
+				if (trainIW.numDocs() < numTraining) {
+					trainDocIDs.add(docID);
 					trainIW.addDocument(doc);
+				}
 			}
 		}
 		ir.close();
