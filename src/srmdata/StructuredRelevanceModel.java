@@ -204,18 +204,7 @@ public class StructuredRelevanceModel {
 		double[] mle = new double[trainIR.numDocs()];
 		double score[] = new double[2];
 		TermEnum terms = trainIR.terms();
-//		boolean trainDone = false;
-		while (true) {
-
-			boolean hasNext = terms.next();
-			if (!hasNext) {
-				terms.close();
-//				if (trainDone)
-					break;
-//				terms = trainIR.terms();
-//				trainDone = true;
-//				continue;
-			}
+		while (terms.next()) {
 
 			Term t = terms.term();
 			if (!t.field().equals(fieldName) || containsNumber(t.text()))
