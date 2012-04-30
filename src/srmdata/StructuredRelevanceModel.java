@@ -255,20 +255,25 @@ public class StructuredRelevanceModel {
 			mlEstimates[i] = 0.0;
 		}
 
+		pavg = Math.log10(pavg);
 		double term1 = meanfreq / (1.0 + meanfreq);
 		double term2 = 1.0 / (1.0 + meanfreq);
 		TermDocs termDocs = ir.termDocs(t);
 		while (termDocs.next()) {
 			int d = termDocs.doc();
 			int tf = termDocs.freq();
+			if (tf == 0.0) {
+				mlEstimates[d] = 0.0;
+				continue;
+			}
 			double R = term2 * Math.pow(term1,tf);
-			double pml = ((double)tf) / doc_length[d];
-			double val = Math.pow(pml, 1.0-R) * Math.pow(pavg, R);
+			double pml = Math.log10( ((double)tf)/doc_length[d] );
+			double val = (1.0-R)*pml + R*pavg;
 			mlEstimates[d] = val;
 		}
 		termDocs.close();
 
-		double defaultVal = ((double)collectionFreq) / collectionSize;
+		double defaultVal = Math.log10((double)collectionFreq/collectionSize);
 		for (int md = 0; md < ir.maxDoc(); ++md) {
 			if (mlEstimates[md] == 0.0)
 				mlEstimates[md] = defaultVal;
