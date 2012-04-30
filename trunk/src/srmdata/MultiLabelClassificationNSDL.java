@@ -43,7 +43,7 @@ public class MultiLabelClassificationNSDL {
 	public static final String TRAIN_INDEX_NAME = "../../multi_label_train_index";
 	public static final String PREDICTION_OUTFILE_NAME = "../../outputs/prediction_output";
 	public static final String OUTPUT_FILE_NAME = "../../outputs/output";
-	public static final String SCORE_FILE_NAME = "../../outputs/scores";
+	public static final String SCORE_FILE_NAME = "../../outputs/log_scores";
 	private static int numTesting = 200;
 	private static int numTraining = 80000;
 
@@ -401,9 +401,10 @@ public class MultiLabelClassificationNSDL {
 //							(1.0/avg_desc_len)*Math.log(scores[1][i][j]) + (1.0/avg_content_len)*Math.log(scores[2][i][j]);
 //					combined_score[j][i].score = Math.exp(combined_score[j][i].score);
 					combined_score[j][i].score = 
-							Math.pow(scores[0][i][j], 0.55/avg_title_len) *
-							Math.pow(scores[1][i][j], 0.40/avg_desc_len) *
-							Math.pow(scores[2][i][j], 0.05/avg_content_len);
+							scores[0][i][j] * 0.30 +
+							scores[1][i][j] * 0.60 +
+							scores[2][i][j] * 0.10;
+					combined_score[j][i].score = Math.pow(10.0, combined_score[j][i].score);
 	//				if (scores[1][i][j] == 0.0) {
 	//					System.out.print("Score is Zero: " + i + " " + j + " ");
 	//				}
@@ -419,7 +420,7 @@ public class MultiLabelClassificationNSDL {
 			int topN = 500;
 			for (int i = 0; i < nTestDocs; ++i) {
 				double total_score = 0.0;
-				for (int j = 0; j < nTrainDocs; ++j) {
+				for (int j = 0; j < topN; ++j) {
 					total_score += combined_score[i][j].score;
 				}
 	

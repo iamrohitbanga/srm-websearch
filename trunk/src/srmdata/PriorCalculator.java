@@ -41,7 +41,7 @@ public class PriorCalculator {
 		for (int threadNum = 0; threadNum < numThreads; ++threadNum) {
 			for (int i = 0; i < modelScores[threadNum].length; ++i)
 				for (int j = 0; j < modelScores[threadNum][i].length; ++j)
-					modelScores[threadNum][i][j] = 1.0;
+					modelScores[threadNum][i][j] = 0.0;
 		}
 
 		collectionSize = StructuredRelevanceModel.findCollectionSize(trainIR, fieldName, doc_lengths);
@@ -96,17 +96,13 @@ public class PriorCalculator {
 		double[][] finalModelScores = new double[nTrainDocs][nTestDocs];
 		for (int i = 0; i < finalModelScores.length; ++i) {
 			for (int j = 0; j < finalModelScores[i].length; ++j) {
-				finalModelScores[i][j] = 1.0;
+				finalModelScores[i][j] = 0.0;
 			}
 		}
 		for (int threadNum = 0; threadNum < numThreads; ++threadNum) {
 			for (int i = 0; i < finalModelScores.length; ++i) {
 				for (int j = 0; j < finalModelScores[i].length; ++j) {
-					finalModelScores[i][j] *= modelScores[threadNum][i][j];
-//					if (modelScores[threadNum][i][j] == 0.0) {
-//						System.out.println("here " + threadNum + " " + i + " " + j);
-//						System.exit(0);
-//					}
+					finalModelScores[i][j] += modelScores[threadNum][i][j];
 				}
 			}
 		}
@@ -124,9 +120,9 @@ public class PriorCalculator {
 			this.fromIndex = fromIndex;
 			this.toIndex = toIndex;
 			this.localModelScores = localModelScores;
-			for (int i = 0; i < localModelScores.length; ++i)
-				for (int j = 0; j < localModelScores[i].length; ++j)
-					localModelScores[i][j] = 1.0;
+			for (int i = 0; i < this.localModelScores.length; ++i)
+				for (int j = 0; j < this.localModelScores[i].length; ++j)
+					this.localModelScores[i][j] = 0.0;
 		}
 
 		@Override
@@ -152,9 +148,9 @@ public class PriorCalculator {
 	//				long t1 = System.nanoTime();
 					for (int md = 0; md < nTrainDocs; ++md) {
 						score[0] = mle[md];
-						score[1] = 1.0 - score[0];
+						score[1] = Math.log10(1.0-Math.pow(10,score[0]));
 						for (int q = 0; q < nTestDocs; ++q)
-							localModelScores[md][q] *= score[termDocsArr[q]];
+							localModelScores[md][q] += score[termDocsArr[q]];
 					}
 	//				long t2 = System.nanoTime();
 	//				System.out.println("Time Taken: " + (t2-t1)/1E6);
