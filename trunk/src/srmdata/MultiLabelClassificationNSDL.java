@@ -1,7 +1,9 @@
 package srmdata;
 
+import java.io.BufferedReader;
 import java.io.BufferedWriter;
 import java.io.File;
+import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.util.ArrayList;
@@ -20,6 +22,9 @@ import org.apache.lucene.document.Document;
 import org.apache.lucene.document.Fieldable;
 import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.IndexWriter;
+import org.apache.lucene.index.Term;
+import org.apache.lucene.index.TermDocs;
+import org.apache.lucene.index.TermEnum;
 import org.apache.lucene.search.BooleanClause;
 import org.apache.lucene.search.BooleanQuery;
 import org.apache.lucene.search.IndexSearcher;
@@ -38,15 +43,17 @@ public class MultiLabelClassificationNSDL {
 	public static final String TRAIN_INDEX_NAME = "../../multi_label_train_index";
 	public static final String PREDICTION_OUTFILE_NAME = "../../outputs/prediction_output";
 	public static final String OUTPUT_FILE_NAME = "../../outputs/output";
-	private static int numTesting = 100;
-	private static int numTraining = 10000;
+	public static final String SCORE_FILE_NAME = "../../outputs/scores";
+	private static int numTesting = 200;
+	private static int numTraining = 80000;
 
 	private static Set<Integer> testDocIDs;
 	private static Set<Integer> trainDocIDs;
 
 	private static Map<String,Double> time_taken;
+	private static boolean generateDataAgain = false;
 	private static final int MAX_RESULTS = 10;
-	
+
 	private static boolean shouldTokenize(String field) {
 		if (field.equals("subject"))
 			return true;
@@ -56,17 +63,19 @@ public class MultiLabelClassificationNSDL {
 	
 	static class PredictionResult {
 		int docID;
+		String URI;
 		Set<String> actualValues;
 		LinkedHashSet<String> predictedValues;
 
 		Set<String> actualTokens;
 		List<List<String>> predictedTokens;
 		
-		PredictionResult() {
+		PredictionResult(String URI) {
 			actualValues = new HashSet<String>();
 			predictedValues = new LinkedHashSet<String>();
 			actualTokens = new LinkedHashSet<String>();
 			predictedTokens = new ArrayList<List<String>>();
+			this.URI = URI;
 		}
 
 		List<String> tokenize(String strValue, boolean shouldTokenize) {
@@ -120,10 +129,12 @@ public class MultiLabelClassificationNSDL {
 
 		long t1, t2;
 
-		t1 = System.nanoTime();		
-			generateMultiLabelDataset();
-		t2 = System.nanoTime();
-		System.out.println("Time Taken for Generation: " + (t2-t1)/1E9);
+		if (generateDataAgain ) {
+			t1 = System.nanoTime();		
+				generateMultiLabelDataset();
+			t2 = System.nanoTime();
+			System.out.println("Time Taken for Generation: " + (t2-t1)/1E9);
+		}
 
 		List<PredictionResult> results_subject = new ArrayList<PredictionResult>();
 		List<PredictionResult> results_audience = new ArrayList<PredictionResult>();
@@ -249,7 +260,7 @@ public class MultiLabelClassificationNSDL {
 		for (PredictionResult result : results) {
 
 			writer.append("\n");
-			writer.append("docID: " + result.docID + "\n");
+			writer.append("docID: " + result.docID + "    URI: " + result.URI + "\n");
 
 			writer.append("actualValues: " + result.getActualValues().size() + "\n");
 			for (String actualValue : result.getActualValues())
@@ -325,38 +336,54 @@ public class MultiLabelClassificationNSDL {
 		long t1, t2;
 		double ttaken;
 
+		double[][][] scores;
 		int num_fields = 3;
-		double[][][] scores = new double[num_fields][][];
-//		StructuredRelevanceModel srm = new StructuredRelevanceModel();
-		t1 = System.nanoTime();
-//		scores[0] = srm.computePriors(testIR, trainIR, "title");
-		PriorCalculator priorCalcTitle = new PriorCalculator(testIR, trainIR, "title");
-		scores[0] = priorCalcTitle.computePriors();
-		priorCalcTitle = null;
-		t2 = System.nanoTime();
-		ttaken = ((double)(t2-t1)) / 1E9;
-		System.out.println("Time Taken Priors (title): " + ttaken);
-		time_taken.put("title_model", ttaken);
+		if (generateDataAgain) {
+			scores = new double[num_fields][][];
+	//		StructuredRelevanceModel srm = new StructuredRelevanceModel();
+			t1 = System.nanoTime();
+	//		scores[0] = srm.computePriors(testIR, trainIR, "title");
+			PriorCalculator priorCalcTitle = new PriorCalculator(testIR, trainIR, "title");
+			scores[0] = priorCalcTitle.computePriors();
+			priorCalcTitle = null;
+			t2 = System.nanoTime();
+			ttaken = ((double)(t2-t1)) / 1E9;
+			System.out.println("Time Taken Priors (title): " + ttaken);
+			time_taken.put("title_model", ttaken);
+	
+			t1 = System.nanoTime();
+	//			scores[1] = srm.computePriors(testIR, trainIR, "desc");
+			PriorCalculator priorCalcDesc = new PriorCalculator(testIR, trainIR, "desc");
+			scores[1] = priorCalcDesc.computePriors();
+			priorCalcDesc = null;
+			t2 = System.nanoTime();
+			ttaken = ((double)(t2-t1)) / 1E9;
+			System.out.println("Time Taken Priors (desc): " + ttaken);
+			time_taken.put("desc_model", ttaken);
+	
+			t1 = System.nanoTime();
+	//			scores[2] = srm.computePriors(testIR, trainIR, "content");
+			PriorCalculator priorCalcContent = new PriorCalculator(testIR, trainIR, "content");
+			scores[2] = priorCalcContent.computePriors();
+			priorCalcContent = null;
+			t2 = System.nanoTime();
+			ttaken = ((double)(t2-t1)) / 1E9;
+			System.out.println("Time Taken Priors (content): " + ttaken);
+			time_taken.put("content_model", ttaken);
+	
+			dumpScores(scores);
+		}
+		else {
+			scores = readScores();
+		}
 
-		t1 = System.nanoTime();
-//			scores[1] = srm.computePriors(testIR, trainIR, "desc");
-		PriorCalculator priorCalcDesc = new PriorCalculator(testIR, trainIR, "desc");
-		scores[1] = priorCalcDesc.computePriors();
-		priorCalcDesc = null;
-		t2 = System.nanoTime();
-		ttaken = ((double)(t2-t1)) / 1E9;
-		System.out.println("Time Taken Priors (desc): " + ttaken);
-		time_taken.put("desc_model", ttaken);
+		double avg_title_len = findAverageFieldLength(trainIR, "title");
+		double avg_desc_len = findAverageFieldLength(trainIR, "desc");
+		double avg_content_len = findAverageFieldLength(trainIR, "content");
 
-		t1 = System.nanoTime();
-//			scores[2] = srm.computePriors(testIR, trainIR, "content");
-		PriorCalculator priorCalcContent = new PriorCalculator(testIR, trainIR, "content");
-		scores[2] = priorCalcContent.computePriors();
-		priorCalcContent = null;
-		t2 = System.nanoTime();
-		ttaken = ((double)(t2-t1)) / 1E9;
-		System.out.println("Time Taken Priors (content): " + ttaken);
-		time_taken.put("content_model", ttaken);
+		System.out.println("avg_title_len: " + avg_title_len);
+		System.out.println("avg_desc_len: " + avg_desc_len);
+		System.out.println("avg_content_len: " + avg_content_len);
 
 		for (String fieldToPredict : fieldsToPredict.keySet()) {
 			List<PredictionResult> results = fieldsToPredict.get(fieldToPredict);
@@ -370,7 +397,13 @@ public class MultiLabelClassificationNSDL {
 			for (int i = 0; i < nTrainDocs; ++i) {
 				for (int j = 0; j < nTestDocs; ++j) {
 					combined_score[j][i].docID = i;
-					combined_score[j][i].score = scores[0][i][j] * scores[1][i][j];// * scores[2][i][j];
+//					combined_score[j][i].score = (1.0/avg_title_len)*Math.log(scores[0][i][j]) +
+//							(1.0/avg_desc_len)*Math.log(scores[1][i][j]) + (1.0/avg_content_len)*Math.log(scores[2][i][j]);
+//					combined_score[j][i].score = Math.exp(combined_score[j][i].score);
+					combined_score[j][i].score = 
+							Math.pow(scores[0][i][j], 0.55/avg_title_len) *
+							Math.pow(scores[1][i][j], 0.40/avg_desc_len) *
+							Math.pow(scores[2][i][j], 0.05/avg_content_len);
 	//				if (scores[1][i][j] == 0.0) {
 	//					System.out.print("Score is Zero: " + i + " " + j + " ");
 	//				}
@@ -432,31 +465,103 @@ public class MultiLabelClassificationNSDL {
 	
 				Document testDoc = testIR.document(i);
 	
-				PredictionResult result = new PredictionResult();
-				System.out.println("docID:" + i + "      URI:" + testDoc.get("URI") + "       ID:" + testDoc.get("id"));
+				PredictionResult result = new PredictionResult(testDoc.get("URI"));
+//				System.out.println("docID:" + i + "      URI:" + testDoc.get("URI") + "       ID:" + testDoc.get("id"));
 				for (Fieldable fieldable : testDoc.getFieldables(fieldToPredict)) {
 					String actualValue = fieldable.stringValue();
-					System.out.print(actualValue + ":");
+//					System.out.print(actualValue + ":");
 					result.addActualValue(actualValue, shouldTokenize(fieldToPredict));
 				}
-				System.out.println(":");
-				System.out.print("*");
+//				System.out.println(":");
+//				System.out.print("*");
 				result.docID = i;
 				int max = (relevanceModel.size() < 10) ? relevanceModel.size() : 10;
 				for (int j = 0; j < max; ++j) {
 					Relevance relevance = relevanceModel.get(j);
 					String predictedValue = relevance.fieldValue;
-					System.out.println("    " + predictedValue + "(" + relevance.score + ");");
+//					System.out.println("    " + predictedValue + "(" + relevance.score + ");");
 					result.addPredictedValue(predictedValue, shouldTokenize(fieldToPredict));
 				}
 	
 				results.add(result);
-				System.out.println();
+//				System.out.println();
 			}
 		}
 
 		trainIR.close();
 		testIR.close();
+	}
+
+	private static void dumpScores(double[][][] scores) throws Exception {
+		BufferedWriter writer = new BufferedWriter(new FileWriter(new File(SCORE_FILE_NAME + "_" + numTesting + "_" + numTraining)));
+		writer.write(numTraining + " " + numTesting + "\n");
+		for (int i = 0; i < scores.length; ++i) {
+			for (int j = 0; j < scores[i].length; ++j) {
+				for (int k = 0; k < scores[i][j].length; ++k) {
+					writer.write(" " + scores[i][j][k]);
+				}
+				writer.write("\n");
+			}
+		}
+		writer.flush();
+		writer.close();
+	}
+
+	private static double[][][] readScores() throws Exception {
+
+		double[][][] scores;
+		BufferedReader reader = new BufferedReader(new FileReader(new File(SCORE_FILE_NAME + "_" + numTesting + "_" + numTraining)));
+		String line = reader.readLine();
+
+		String[] sizes = line.split(" ");
+		numTraining = Integer.parseInt(sizes[0]);
+		numTesting = Integer.parseInt(sizes[1]);
+		scores = new double[3][numTraining][numTesting];
+		
+		for (int i = 0; i < scores.length; ++i) {
+			for (int j = 0; j < numTraining; ++j) {
+				line = reader.readLine();
+				String[] values = line.split(" ");
+				int index = 0;
+				for (int k = 0; k < values.length; ++k) {
+					if (values[k].trim().length() == 0)
+						continue;
+					scores[i][j][index] = Double.parseDouble(values[k].trim());
+//					System.out.print(" " + scores[i][j][index]);
+					++index;
+				}
+//				System.out.println();
+//				System.exit(1);
+			}
+		}
+		reader.close();
+
+		return scores;
+	}
+
+	private static double findAverageFieldLength(IndexReader trainIR, String field) throws Exception {
+
+		// find average lengths
+		int[] docLengths = new int[numTraining];
+		
+		TermEnum terms = trainIR.terms();
+		while (terms.next()) {
+			Term term = terms.term();
+			if (!term.field().equals(field))
+				continue;
+			TermDocs docs = trainIR.termDocs(term);
+			while (docs.next()) {
+				docLengths[docs.doc()]++;
+			}
+		}
+		
+		double avg = 0.0;
+		for (int i = 0; i < docLengths.length; ++i) {
+			avg = avg + docLengths[i];
+		}
+		avg = avg / docLengths.length;
+
+		return avg;
 	}
 
 	static class Relevance {
