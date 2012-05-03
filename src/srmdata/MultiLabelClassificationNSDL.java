@@ -176,6 +176,7 @@ public class MultiLabelClassificationNSDL {
 		IndexReader trainIR = IndexReader.open(FSDirectory.open(trainFile), true);
 		IndexReader testIR = IndexReader.open(FSDirectory.open(testFile), true);
 
+		numTesting = testIR.numDocs();
 		// first search for all documents having at least one value for each of
 		// content, description, title, subject, audience fields
 		IndexSearcher searcher1 = new IndexSearcher(trainIR);
@@ -401,8 +402,8 @@ public class MultiLabelClassificationNSDL {
 //							(1.0/avg_desc_len)*Math.log(scores[1][i][j]) + (1.0/avg_content_len)*Math.log(scores[2][i][j]);
 //					combined_score[j][i].score = Math.exp(combined_score[j][i].score);
 					combined_score[j][i].score = 
-							scores[0][i][j] * 0.30 +
-							scores[1][i][j] * 0.60 +
+							scores[0][i][j] * 0.45 +
+							scores[1][i][j] * 0.45 +
 							scores[2][i][j] * 0.10;
 					combined_score[j][i].score = Math.pow(10.0, combined_score[j][i].score);
 	//				if (scores[1][i][j] == 0.0) {
